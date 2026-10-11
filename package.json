@@ -1,0 +1,43 @@
+{
+  "name": "word-lagos",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "npm run dev -w @word-lagos/web",
+    "build": "npm run dictionary && tsc --noEmit && npm run build -w @word-lagos/web",
+    "dictionary": "node scripts/build-dictionary.mjs",
+    "test": "vitest run",
+    "check": "tsc --noEmit",
+    "verify": "npm run lint && npm run format:check && npm run test && npm run build",
+    "lint": "oxlint --deny-warnings apps packages scripts",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.0",
+    "vite": "^7.1.0",
+    "vitest": "^5.0.3",
+    "word-list": "4.1.0"
+  }
+}

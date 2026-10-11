@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Word Lagos · Embedded phone preview</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font: 12px system-ui;
+        background: #202923;
+        color: #fff;
+      }
+      header {
+        height: 56px;
+        box-sizing: border-box;
+        padding: 0 15px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      header span {
+        font-size: 10px;
+        color: #b4c7b8;
+      }
+      iframe {
+        display: block;
+        border: 0;
+        width: 100%;
+        height: calc(100dvh - 56px);
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #dae1d5;
+      }
+      .phone-preview {
+        width: min(100%, 390px);
+        height: min(100dvh, 844px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: #202923;
+        box-shadow: 0 12px 60px #243d3226;
+      }
+      header {
+        flex-shrink: 0;
+      }
+      iframe {
+        flex: 1;
+        height: auto;
+        min-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="phone-preview">
+      <header>Game player preview<span>56px host bar</span></header>
+      <iframe
+        title="Word Lagos embedded game"
+        src="/"
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms"
+        allow="autoplay; gamepad"
+        referrerpolicy="no-referrer"
+      ></iframe>
+    </section>
+  </body>
+</html>
