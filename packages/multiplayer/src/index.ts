@@ -21,7 +21,7 @@ export const historySchema = z
     }),
   )
   .max(1000);
-export const codeSchema = z.string().regex(/^[A-Z]{6}$/);
+export const codeSchema = z.string().regex(/^[A-Z0-9]{6}$/);
 export const commandSchema = z
   .object({
     id: z.uuid(),
@@ -63,7 +63,14 @@ export const replySchema = z.object({
   ok: z.boolean(),
   error: z.string().optional(),
 });
-export const runtimeSchema = z.object({ authMode: z.enum(['local', 'vatar', 'disabled']) });
+export const runtimeSchema = z.object({
+  authMode: z.enum(['local', 'vatar', 'disabled']),
+  platformMatches: z.boolean().default(false),
+  themeProduct: z
+    .object({ id: z.string(), name: z.string(), price: z.number().int() })
+    .nullable()
+    .default(null),
+});
 
 export const gameSummarySchema = z.object({
   code: codeSchema,

@@ -2845,3 +2845,67 @@
     margin-top: 0;
   }
 }
+
+@layer components {
+  .theme-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .theme-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    border: 2px solid #dce4d2;
+    border-radius: 14px;
+    padding: 15px;
+    background: #f1f5e8;
+  }
+  .theme-option[aria-pressed='true'] {
+    border-color: #39724a;
+  }
+  .theme-option:disabled {
+    opacity: 0.8;
+  }
+  .theme-option > span:not(.theme-swatch) {
+    font-size: 11px;
+  }
+  .theme-swatch {
+    display: block;
+    width: 100%;
+    height: 72px;
+    border-radius: 8px;
+  }
+  .classic-swatch {
+    background: repeating-conic-gradient(#a3c9c9 0% 25%, #e6edd9 0% 50%) 0 / 32px 32px;
+  }
+  .sunset-swatch {
+    background: repeating-conic-gradient(#e0a7b5 0% 25%, #fbdfb6 0% 50%) 0 / 32px 32px;
+  }
+  .theme-sunset .board {
+    background: #ebc7b0;
+  }
+  .theme-sunset .square:not(.has-tile).premium-normal {
+    background: #faead5;
+  }
+  .theme-sunset .square:not(.has-tile).premium-TW {
+    background: #bd587d;
+  }
+  .theme-sunset .square:not(.has-tile).premium-DW {
+    background: #dc9b89;
+  }
+  .theme-sunset .square:not(.has-tile).premium-TL {
+    background: #8f789f;
+  }
+  .theme-sunset .square:not(.has-tile).premium-DL {
+    background: #c2b0d0;
+  }
+  .theme-sunset .mobile-game-header {
+    background: linear-gradient(120deg, #b56a86, #755888);
+  }
+  .theme-sunset .rack-panel {
+    background: #fbdfb6;
+  }
+}

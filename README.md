@@ -61,9 +61,19 @@ Deploy **one Railway service** from `DevAdedeji/word-lagos`, using the repositor
 
 Production rejects local development identities. Test, live and local games are isolated, even in a shared database. An initial additive schema is created at startup; future changes require versioned migrations.
 
-### Current integration boundary
+### LagosLife integration
 
-This milestone supplies **our own friendly invitation codes and game rooms**. It does not yet call `Vatar.match.create/join`, post signed platform match results, or implement stakes, purchases, webhooks or platform leaderboards. Platform matchmaking and signed results are the next integration step, to test with the real draft and test keys before LagosLife submission. Names are supported; platform avatars are not yet shown.
+Embedded startup initializes the official hosted SDK and listens for pause/resume. Pausing suspends Ayo's worker and local turn input; server-owned multiplayer turns continue to persist. Standalone computer play remains available.
+
+New LagosLife friendlies use zero-stake SDK matches. The backend verifies platform membership, environment, two seats and zero stake before importing a board. Existing seven-day friend games remain available; platform invitations expire after 15 minutes and games after two hours. Finished boards persist before a background worker signs and posts the final result. Failed deliveries retry from the database every 15 seconds. Expired platform matches cannot receive a late result.
+
+Configure `VATAR_RESULTS_SECRET` alongside the matching `VATAR_SECRET` on Railway. Use test credentials for the draft, and replace both with the matching live credentials only after approval. Without a results secret, platform match creation is disabled.
+
+The optional `sunset_board` product costs ₦100 and is a one-off cosmetic theme. Create it in the LagosLife dashboard with exactly that ID and price. Core gameplay is free. Purchase claims verify the session, provider purchase ID, owner, product, price, currency and mode. A unique purchase ledger grants ownership before acknowledging delivery; failed acknowledgments retry. Restore purchases recovers interrupted checkout and rechecks ownership/refunds. The checkout and payment details are handled only by LagosLife. No payment webhook is required for this integration.
+
+Migration 1 runs transactionally at startup, adding a purchase ledger, unique platform-match binding and support for SDK alphanumeric codes. It preserves existing game/session rows. Rolling back application code leaves the additive ledger intact; an older server will not understand newly issued alphanumeric invitation codes. Keep the new protocol when rolling back a frontend-only change.
+
+Before submission, verify SDK init, a real sandbox purchase/restore, and a completed platform friendly result in the developer checklist. Never simulate a delivered item or post a result for an unfinished board. The platform review still requires the developer's agreement and final submission.
 
 Use **one application replica** for now. Room connections live in one Node process; database revision checks protect saved moves. A restart drops connections, which reauthenticate and recreate rooms from persisted matches. Horizontal scaling needs shared Colyseus presence and routing. On an unconfirmed move, reconnect to inspect the saved board before retrying. Do not expose local development authentication publicly.
 

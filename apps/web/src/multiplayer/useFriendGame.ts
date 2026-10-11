@@ -143,6 +143,13 @@ export function useFriendGame() {
       if (active) void active.leave();
     };
   }, [code, attempt, rejectPending]);
+  useEffect(() => {
+    const update = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === code) roomRef.current?.send('ready');
+    };
+    window.addEventListener('wordpadi:platform-update', update);
+    return () => window.removeEventListener('wordpadi:platform-update', update);
+  }, [code]);
   async function send(action: Action): Promise<void> {
     if (!roomRef.current || status !== 'connected' || !snapshot || sendingRef.current)
       throw new Error('Wait until your game is connected.');

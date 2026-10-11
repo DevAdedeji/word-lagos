@@ -8,6 +8,7 @@ import {
   Leaf,
   Layers,
   Plus,
+  Palette,
   RotateCcw,
   Shuffle,
   SkipForward,
@@ -37,10 +38,21 @@ import ActionIcon from './ActionIcon';
 import { useFriendGame } from './multiplayer/useFriendGame';
 import FriendLobby from './multiplayer/FriendLobby';
 import MyGames from './multiplayer/MyGames';
+import { usePlatform } from './platform/usePlatform';
+import BoardThemes from './platform/BoardThemes';
 import InviteCode from './multiplayer/InviteCode';
 import { useGameDraft } from './multiplayer/useGameDraft';
 import type { BotMove } from '../../../packages/game-core/src/bot';
-type Modal = 'help' | 'new' | 'dictionary' | 'exchange' | 'history' | 'friends' | 'games' | null;
+type Modal =
+  | 'help'
+  | 'new'
+  | 'dictionary'
+  | 'exchange'
+  | 'history'
+  | 'friends'
+  | 'games'
+  | 'themes'
+  | null;
 const alphabet = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const freshGame = (): Game => createGame('computer', crypto.getRandomValues(new Uint32Array(1))[0]);
 const premiumNames = {
@@ -53,6 +65,7 @@ const premiumNames = {
 export default function App() {
   const [soloGame, setGame] = useState<Game>(() => loadGame() ?? freshGame());
   const friend = useFriendGame();
+  const platform = usePlatform();
   const multiplayer = !!friend.code;
   const game = multiplayer
     ? (friend.snapshot ?? {
@@ -134,8 +147,9 @@ export default function App() {
 
   const dictionary = useMemo(() => makeLexicon(wordsText), [wordsText]);
   const opponentTurn = game.turn === 1 && game.status === 'playing';
-  const isThinking = !multiplayer && opponentTurn;
+  const isThinking = !multiplayer && opponentTurn && !platform.paused;
   const canPlay =
+    !platform.paused &&
     !!wordsText &&
     !loadError &&
     !opponentTurn &&
@@ -350,7 +364,10 @@ export default function App() {
         ? 'You’ve got a way with words.'
         : `${opponentName} takes this one.`;
   return (
-    <div ref={appRef} className="app-shell min-h-screen bg-paper text-forest">
+    <div
+      ref={appRef}
+      className={`app-shell min-h-screen bg-paper text-forest ${platform.theme === 'sunset' ? 'theme-sunset' : ''}`}
+    >
       <header className="mobile-game-header">
         <div className="mobile-topbar">
           <button
@@ -968,6 +985,8 @@ export default function App() {
                 }}
                 onNew={() => setModal('new')}
               />
+            ) : modal === 'themes' ? (
+              <BoardThemes platform={platform} />
             ) : modal === 'friends' ? (
               <FriendLobby
                 onJoin={(code) => {
@@ -990,6 +1009,9 @@ export default function App() {
                 </button>
                 <button className="new-game-button modal-primary" onClick={start}>
                   Play against Ayo <ArrowRight size={18} />
+                </button>
+                <button className="quiet-button modal-help" onClick={() => setModal('themes')}>
+                  <Palette size={17} /> Board themes
                 </button>
                 <button className="quiet-button modal-help" onClick={() => setModal('help')}>
                   <CircleHelp size={17} /> How to play

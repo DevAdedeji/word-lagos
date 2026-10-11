@@ -4,6 +4,7 @@ import { drizzle as pgDrizzle } from 'drizzle-orm/node-postgres';
 import { integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { and, eq, sql, desc } from 'drizzle-orm';
 import pg from 'pg';
+import type { Purchase } from './vatar';
 import { z } from 'zod';
 import { boardSchema, historySchema, tileSchema, codeSchema } from '@word-lagos/multiplayer';
 
@@ -36,6 +37,13 @@ export const matchSchema = z.object({
     .array(z.object({ id: z.string(), playerId: z.string(), digest: z.string() }))
     .max(1000),
   expiresAt: z.number(),
+  platform: z
+    .object({
+      id: z.string(),
+      nonce: z.string().nullable(),
+      result: z.enum(['pending', 'sent', 'expired']).default('pending'),
+    })
+    .optional(),
 });
 export type Match = z.infer<typeof matchSchema>;
 const matches = pgTable('friend_matches', {
@@ -48,6 +56,16 @@ const sessions = pgTable('local_sessions', {
   hash: text('hash').primaryKey(),
   player: jsonb('player').$type<Player>().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+const purchases = pgTable('vatar_purchases', {
+  id: text('id').notNull(),
+  environment: text('environment').notNull(),
+  playerId: text('player_id').notNull(),
+  productId: text('product_id').notNull(),
+  amount: integer('amount').notNull(),
+  currency: text('currency').notNull(),
+  status: text('status').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 export async function openStore(databaseUrl?: string, localPath?: string) {
   const client = databaseUrl
@@ -67,6 +85,31 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
   await db.execute(
     sql`CREATE TABLE IF NOT EXISTS local_sessions (hash text PRIMARY KEY, player jsonb NOT NULL, expires_at timestamptz NOT NULL)`,
   );
+  await db.execute(
+    sql`CREATE TABLE IF NOT EXISTS schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
+  );
+  // Migration 1: additive purchase ledger, platform identity uniqueness, and SDK invite codes.
+  await db.transaction(async (tx) => {
+    const applied = await tx.execute(
+      sql`INSERT INTO schema_migrations(version) VALUES (1) ON CONFLICT DO NOTHING RETURNING version`,
+    );
+    if (!applied.rows.length) return;
+    await tx.execute(
+      sql`CREATE TABLE vatar_purchases (id text NOT NULL, environment text NOT NULL CHECK (environment IN ('test','live')), player_id text NOT NULL, product_id text NOT NULL, amount integer NOT NULL CHECK (amount > 0), currency text NOT NULL CHECK (currency = 'NGN'), status text NOT NULL CHECK (status IN ('pending','delivered','refunded')), updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (id, environment))`,
+    );
+    await tx.execute(
+      sql`CREATE INDEX vatar_purchases_owner ON vatar_purchases(environment, player_id)`,
+    );
+    await tx.execute(
+      sql`CREATE UNIQUE INDEX friend_matches_platform_id ON friend_matches ((data->>'environment'), (data->'platform'->>'id')) WHERE data->'platform'->>'id' IS NOT NULL`,
+    );
+    await tx.execute(
+      sql`ALTER TABLE friend_matches DROP CONSTRAINT IF EXISTS friend_matches_code_check`,
+    );
+    await tx.execute(
+      sql`ALTER TABLE friend_matches ADD CONSTRAINT friend_matches_code_check CHECK (code ~ '^[A-Z0-9]{6}$')`,
+    );
+  });
   const owned = (playerId: string, environment: string) =>
     and(
       sql`${matches.data}->'players' @> ${JSON.stringify([{ id: playerId }])}::jsonb`,
@@ -82,6 +125,103 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
     updatedAt: matches.updatedAt,
   };
   return {
+    async grantPurchase(purchase: Purchase): Promise<void> {
+      await db
+        .insert(purchases)
+        .values({
+          id: purchase.id,
+          environment: purchase.mode,
+          playerId: purchase.playerId,
+          productId: purchase.productId,
+          amount: purchase.amount,
+          currency: purchase.currency,
+          status: 'pending',
+        })
+        .onConflictDoNothing();
+    },
+    async deliveredPurchase(id: string, environment: string): Promise<void> {
+      await db
+        .update(purchases)
+        .set({ status: 'delivered', updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(purchases.id, id),
+            eq(purchases.environment, environment),
+            sql`${purchases.status} <> 'refunded'`,
+          ),
+        );
+    },
+    async revokePurchase(id: string, environment: string): Promise<void> {
+      await db
+        .update(purchases)
+        .set({ status: 'refunded', updatedAt: sql`now()` })
+        .where(and(eq(purchases.id, id), eq(purchases.environment, environment)));
+    },
+    async ownsTheme(playerId: string, environment: string): Promise<boolean> {
+      const rows = await db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(
+          and(
+            eq(purchases.playerId, playerId),
+            eq(purchases.environment, environment),
+            eq(purchases.productId, 'sunset_board'),
+            sql`${purchases.status} <> 'refunded'`,
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    },
+    async ownedPurchases(playerId: string, environment: string) {
+      return db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(
+          and(
+            eq(purchases.playerId, playerId),
+            eq(purchases.environment, environment),
+            eq(purchases.productId, 'sunset_board'),
+            sql`${purchases.status} <> 'refunded'`,
+          ),
+        )
+        .limit(20);
+    },
+    async pendingPurchases(environment: string) {
+      return db
+        .select({ id: purchases.id, playerId: purchases.playerId })
+        .from(purchases)
+        .where(and(eq(purchases.environment, environment), eq(purchases.status, 'pending')))
+        .orderBy(purchases.updatedAt)
+        .limit(10);
+    },
+    async platformMatch(id: string, environment: string): Promise<Match | null> {
+      const [row] = await db
+        .select()
+        .from(matches)
+        .where(
+          and(
+            sql`${matches.data}->>'environment' = ${environment}`,
+            sql`${matches.data}->'platform'->>'id' = ${id}`,
+          ),
+        )
+        .limit(1);
+      return row ? matchSchema.parse(row.data) : null;
+    },
+    async pendingResults(environment: string): Promise<Match[]> {
+      const rows = await db
+        .select()
+        .from(matches)
+        .where(
+          and(
+            sql`${matches.data}->>'environment' = ${environment}`,
+            sql`${matches.data}->'platform'->>'result' = 'pending'`,
+            finished,
+          ),
+        )
+        .orderBy(matches.updatedAt)
+        .limit(10);
+      return rows.map((row) => matchSchema.parse(row.data));
+    },
     async list(playerId: string, environment: string, completed: boolean, offset: number) {
       return db
         .select(summaryColumns)

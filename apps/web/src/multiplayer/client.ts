@@ -2,49 +2,8 @@ import { Client, type Room } from '@colyseus/sdk';
 import { z } from 'zod';
 import { runtimeSchema, codeSchema, gameListSchema, recordSchema } from '@word-lagos/multiplayer';
 
-interface VatarSDK {
-  init(): Promise<{
-    player: { id: string; name: string; avatar: string | null };
-    session: string;
-    mode: 'test' | 'live';
-  }>;
-  session(): Promise<{ session: string; exp: number }>;
-}
-declare global {
-  interface Window {
-    Vatar?: VatarSDK;
-  }
-}
-let vatarReady: Promise<void> | undefined;
-async function loadVatar(): Promise<void> {
-  if (!vatarReady)
-    vatarReady = new Promise<void>((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://lagoslife.app/sdk/vatar-games-v1.js';
-      const timer = window.setTimeout(
-        () => reject(new Error('LagosLife could not connect. Reopen the game to retry.')),
-        15000,
-      );
-      script.onload = () => {
-        window.clearTimeout(timer);
-        resolve();
-      };
-      script.onerror = () => {
-        window.clearTimeout(timer);
-        reject(new Error('Could not load LagosLife. Check your connection.'));
-      };
-      document.head.append(script);
-    })
-      .then(async () => {
-        if (!window.Vatar) throw new Error('LagosLife is unavailable.');
-        await window.Vatar.init();
-      })
-      .catch((error) => {
-        vatarReady = undefined;
-        throw error;
-      });
-  return vatarReady;
-}
+import { vatar, platformMatchSchema } from '../platform/sdk';
+
 export async function jsonRequest(path: string, options: RequestInit = {}): Promise<unknown> {
   let response: Response;
   try {
@@ -61,13 +20,25 @@ export async function jsonRequest(path: string, options: RequestInit = {}): Prom
   }
   return data;
 }
+let platformSession: { session: string; exp: number } | undefined;
+let renewingSession: Promise<{ session: string; exp: number }> | undefined;
 export async function session(): Promise<string> {
   const config = runtimeSchema.parse(await jsonRequest('/api/config'));
   if (config.authMode === 'disabled')
     throw new Error('Friend matches are coming soon. Play against Ayo while we connect LagosLife.');
   if (config.authMode === 'vatar') {
-    await loadVatar();
-    return (await window.Vatar!.session()).session;
+    if (platformSession && platformSession.exp > Date.now() + 60000) return platformSession.session;
+    if (!renewingSession)
+      renewingSession = vatar()
+        .then((sdk) => sdk.session())
+        .then((value) => {
+          platformSession = z.object({ session: z.string().min(10), exp: z.number() }).parse(value);
+          return platformSession;
+        })
+        .finally(() => {
+          renewingSession = undefined;
+        });
+    return (await renewingSession).session;
   }
   // Development-only identities are issued by a loopback server. Tabs act as separate players.
   let token = sessionStorage.getItem('word-lagos:local-player');
@@ -81,6 +52,13 @@ export async function session(): Promise<string> {
   return token;
 }
 export async function createFriendGame(): Promise<string> {
+  const config = runtimeSchema.parse(await jsonRequest('/api/config'));
+  if (config.authMode === 'vatar' && config.platformMatches) {
+    const match = platformMatchSchema.parse(
+      await (await vatar()).match.create({ stake: 0, seats: 2 }),
+    );
+    return importPlatformMatch(match);
+  }
   const token = await session();
   return z.object({ code: codeSchema }).parse(
     await jsonRequest('/api/friends', {
@@ -119,4 +97,21 @@ export async function playerRecord(code: string) {
       headers: { Authorization: `Bearer ${token}` },
     }),
   );
+}
+
+export async function importPlatformMatch(match: { id: string; code: string }): Promise<string> {
+  const token = await session();
+  return z.object({ code: codeSchema }).parse(
+    await jsonRequest('/api/platform/matches', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: match.id, code: match.code }),
+    }),
+  ).code;
+}
+export async function joinFriendCode(code: string): Promise<string> {
+  const config = runtimeSchema.parse(await jsonRequest('/api/config'));
+  if (config.authMode !== 'vatar' || !config.platformMatches) return code;
+  const match = platformMatchSchema.parse(await (await vatar()).match.join(code));
+  return importPlatformMatch(match);
 }

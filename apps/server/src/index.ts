@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { Auth } from './auth';
 import { Matches } from './matches';
 import { openStore } from './store';
+import { Vatar } from './vatar';
+import { Purchases } from './purchases';
 
 const envPath = fileURLToPath(new URL('../../../.env', import.meta.url));
 if (existsSync(envPath)) loadEnvFile(envPath);
@@ -18,6 +20,7 @@ const config = z
     AUTH_MODE: z.enum(['local', 'vatar', 'disabled']).default(production ? 'disabled' : 'local'),
     DATABASE_URL: z.string().optional(),
     VATAR_SECRET: z.string().optional(),
+    VATAR_RESULTS_SECRET: z.string().min(16).optional(),
     VATAR_GAME_ID: z.string().optional(),
     PUBLIC_ORIGIN: z.url().optional(),
   })
@@ -41,6 +44,11 @@ const dictionary = makeLexicon(
   await readFile(new URL('../../web/public/words.txt', import.meta.url), 'utf8'),
 );
 const auth = new Auth(config.AUTH_MODE, store, config.VATAR_SECRET, config.VATAR_GAME_ID);
+const provider =
+  config.AUTH_MODE === 'vatar'
+    ? new Vatar(config.VATAR_SECRET!, config.VATAR_RESULTS_SECRET)
+    : undefined;
+const purchases = provider ? new Purchases(store, provider) : undefined;
 const matches = new Matches(
   store,
   dictionary,
@@ -49,6 +57,7 @@ const matches = new Matches(
       ? 'test'
       : 'live'
     : 'local',
+  provider,
 );
 const server = await startServer({
   store,
@@ -57,14 +66,32 @@ const server = await startServer({
   port: config.PORT,
   production,
   publicOrigin: config.PUBLIC_ORIGIN,
+  purchases,
+  platformMatches: provider?.matchesEnabled ?? false,
 });
 console.info(
   JSON.stringify({ event: 'server_ready', port: server.port, authMode: config.AUTH_MODE }),
 );
+let recovery: Promise<void> | null = null;
+const recover = () => {
+  if (recovery) return;
+  recovery = (async () => {
+    await purchases?.retryPending();
+    await matches.retryResults();
+  })()
+    .catch(() => console.warn(JSON.stringify({ event: 'platform_recovery_failed' })))
+    .finally(() => {
+      recovery = null;
+    });
+};
+const recoveryTimer = setInterval(recover, 15000);
+recover();
 let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
+  clearInterval(recoveryTimer);
+  await recovery;
   await server.close();
   await store.close();
 }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function InviteCode({ code }: { code: string }) {
+  const codeRef = useRef<HTMLElement>(null);
   const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
     if (status !== 'copied') return;
@@ -18,6 +19,13 @@ export default function InviteCode({ code }: { code: string }) {
           setStatus('copied');
         } catch {
           setStatus('failed');
+          if (codeRef.current) {
+            const range = document.createRange();
+            range.selectNodeContents(codeRef.current);
+            const selection = window.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          }
         }
       }}
     >
@@ -31,7 +39,9 @@ export default function InviteCode({ code }: { code: string }) {
               : 'Tap to copy your invite code'}
         </span>
       </span>
-      <b className="invite-code">{code}</b>
+      <b ref={codeRef} className="invite-code">
+        {code}
+      </b>
     </button>
   );
 }

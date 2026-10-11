@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowRight, Users } from 'lucide-react';
-import { createFriendGame } from './client';
+import { createFriendGame, joinFriendCode } from './client';
 
 export default function FriendLobby({ onJoin }: { onJoin: (code: string) => void }) {
   const [code, setCode] = useState('');
@@ -27,9 +27,18 @@ export default function FriendLobby({ onJoin }: { onJoin: (code: string) => void
         <ArrowRight size={18} />
       </button>
       <form
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
-          onJoin(code);
+          if (busy) return;
+          setBusy(true);
+          setError('');
+          try {
+            onJoin(await joinFriendCode(code));
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'Could not join this game.');
+          } finally {
+            setBusy(false);
+          }
         }}
       >
         <label htmlFor="friend-code">Have a game code?</label>
@@ -41,7 +50,7 @@ export default function FriendLobby({ onJoin }: { onJoin: (code: string) => void
               setCode(
                 event.target.value
                   .toUpperCase()
-                  .replace(/[^A-Z]/g, '')
+                  .replace(/[^A-Z0-9]/g, '')
                   .slice(0, 6),
               )
             }
@@ -60,7 +69,10 @@ export default function FriendLobby({ onJoin }: { onJoin: (code: string) => void
           {error}
         </p>
       )}
-      <small>Games stay available for seven days. Keep your code to return.</small>
+      <small>
+        Keep your code to return. LagosLife invitations last 15 minutes; matches last up to two
+        hours.
+      </small>
     </div>
   );
 }

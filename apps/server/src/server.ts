@@ -10,6 +10,8 @@ import { Auth, AuthError } from './auth';
 import { Matches, MatchError } from './matches';
 import type { Store } from './store';
 import { friendRoom } from './room';
+import { VatarError } from './vatar';
+import { Purchases, themeProduct } from './purchases';
 export async function startServer({
   store,
   auth,
@@ -17,6 +19,8 @@ export async function startServer({
   port = 0,
   production = false,
   publicOrigin,
+  purchases,
+  platformMatches = false,
 }: {
   store: Store;
   auth: Auth;
@@ -24,6 +28,8 @@ export async function startServer({
   port?: number;
   production?: boolean;
   publicOrigin?: string;
+  purchases?: Purchases;
+  platformMatches?: boolean;
 }) {
   const app = express();
   app.disable('x-powered-by');
@@ -45,7 +51,13 @@ export async function startServer({
       res.status(503).json({ ok: false });
     }
   });
-  app.get('/api/config', (_req, res) => res.json({ authMode: auth.mode }));
+  app.get('/api/config', (_req, res) =>
+    res.json({
+      authMode: auth.mode,
+      platformMatches,
+      themeProduct: purchases ? themeProduct : null,
+    }),
+  );
   app.use(
     '/api',
     rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false }),
@@ -55,6 +67,42 @@ export async function startServer({
     req.headers.authorization?.startsWith('Bearer ')
       ? req.headers.authorization.slice(7)
       : undefined;
+  app.get('/api/platform/theme', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await auth.verify(bearer(req));
+      res.json({ owned: purchases ? await purchases.owned(identity.id) : false });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/platform/purchases/claim', async (req, res, next) => {
+    try {
+      const identity = await auth.verify(bearer(req));
+      const { purchaseId } = z
+        .object({ purchaseId: z.string().min(1).max(160) })
+        .strict()
+        .parse(req.body);
+      if (!purchases) throw new VatarError('Purchases are unavailable.');
+      await purchases.claim(identity.id, purchaseId);
+      res.json({ owned: await purchases.owned(identity.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/platform/matches', async (req, res, next) => {
+    try {
+      const identity = await auth.verify(bearer(req));
+      const { id, code } = z
+        .object({ id: z.string().min(1).max(160), code: codeSchema })
+        .strict()
+        .parse(req.body);
+      const match = await matches.importPlatform(id, code, identity);
+      res.json({ code: match.code });
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post('/api/local-player', async (_req, res, next) => {
     try {
       res.json(await auth.issueLocal());
@@ -124,12 +172,15 @@ export async function startServer({
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       const known =
-        error instanceof AuthError || error instanceof MatchError || error instanceof z.ZodError;
+        error instanceof AuthError ||
+        error instanceof MatchError ||
+        error instanceof VatarError ||
+        error instanceof z.ZodError;
       if (!known) console.error(JSON.stringify({ event: 'request_failed' }));
       res.status(error instanceof AuthError ? 401 : known ? 400 : 500).json({
         error:
           error instanceof z.ZodError
-            ? 'Enter a valid game code.'
+            ? 'Check the request and try again.'
             : known
               ? error.message
               : 'The server could not complete this request.',

@@ -251,8 +251,8 @@ export default function MyGames({
               </button>
             )}
             <p className="games-note">
-              Ayo and unsubmitted tiles are saved on this device. Friend games stay active for seven
-              days.
+              Ayo and unsubmitted tiles are saved on this device. LagosLife invites last 15 minutes
+              and matches up to two hours. Earlier friend games last seven days.
             </p>
           </div>
           <div className="games-footer">

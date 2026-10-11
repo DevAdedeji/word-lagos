@@ -7,6 +7,7 @@ import {
   type GameSummary,
 } from '@word-lagos/multiplayer';
 import type { Match, Player, Store } from './store';
+import { Vatar } from './vatar';
 
 export class MatchError extends Error {}
 export class Matches {
@@ -14,7 +15,101 @@ export class Matches {
     private store: Store,
     private dictionary: ReadonlySet<string>,
     private environment: 'local' | 'test' | 'live' = 'local',
+    private provider?: Vatar,
   ) {}
+  async importPlatform(id: string, code: string, player: Player): Promise<Match> {
+    if (!this.provider?.matchesEnabled)
+      throw new MatchError('LagosLife matches are not configured.');
+    const remote = await this.provider.match(id);
+    if (!remote.players.some((p) => p.playerId === player.id))
+      throw new MatchError('You are not a player in this LagosLife match.');
+    const existing = await this.store.platformMatch(id, this.environment);
+    if (existing?.game.status === 'finished') return existing;
+    if (!['open', 'playing'].includes(remote.status) || remote.endsAt <= Date.now())
+      throw new MatchError('This LagosLife match has ended or expired.');
+    const players = remote.players.map((p) => ({ id: p.playerId, name: p.name }));
+    if (new Set(players.map((p) => p.id)).size !== players.length)
+      throw new MatchError('LagosLife returned invalid players.');
+    if (remote.status === 'playing' && (players.length !== 2 || !remote.nonce))
+      throw new MatchError('LagosLife has not confirmed both players.');
+    if (
+      existing &&
+      existing.game.history.length &&
+      existing.players.some((p, i) => p.id !== players[i]?.id)
+    )
+      throw new MatchError('The match players changed. Reopen LagosLife.');
+    const match: Match = existing
+      ? {
+          ...existing,
+          players,
+          expiresAt: remote.endsAt,
+          platform: { ...existing.platform!, nonce: remote.nonce ?? null },
+          revision: existing.revision + 1,
+        }
+      : {
+          code,
+          environment: this.environment,
+          revision: 0,
+          players,
+          game: { ...createGame('friends', randomInt(1, 4294967296)), mode: 'friends' },
+          receipts: [],
+          expiresAt: remote.endsAt,
+          platform: { id, nonce: remote.nonce ?? null, result: 'pending' },
+        };
+    if (
+      existing &&
+      existing.players.length === players.length &&
+      existing.players.every((p, i) => p.id === players[i]?.id && p.name === players[i]?.name) &&
+      existing.expiresAt === match.expiresAt &&
+      existing.platform?.nonce === match.platform?.nonce
+    )
+      return existing;
+    const saved = existing
+      ? await this.store.save(match, existing.revision)
+      : await this.store.insert(match);
+    if (!saved) {
+      const concurrent = await this.store.platformMatch(id, this.environment);
+      if (concurrent && concurrent.players.some((p) => p.id === player.id)) return concurrent;
+      throw new MatchError('This game code is already in use. Please reopen the match.');
+    }
+    return match;
+  }
+  async retryResults(): Promise<void> {
+    if (!this.provider?.matchesEnabled) return;
+    for (const match of await this.store.pendingResults(this.environment)) {
+      if (!match.platform?.nonce) continue;
+      try {
+        const remote = await this.provider.match(match.platform.id);
+        const winner =
+          match.game.scores[0] === match.game.scores[1]
+            ? 'draw'
+            : match.players[match.game.scores[0] > match.game.scores[1] ? 0 : 1].id;
+        if (remote.status === 'done' && remote.winner !== winner)
+          throw new MatchError('The platform result differs from the saved game.');
+        const expired =
+          ['void', 'cancelled'].includes(remote.status) ||
+          (remote.status !== 'done' && remote.endsAt <= Date.now());
+        if (!expired && remote.status !== 'done')
+          await this.provider.result(match.platform.id, match.platform.nonce, winner);
+        await this.store.save(
+          {
+            ...match,
+            revision: match.revision + 1,
+            platform: { ...match.platform, result: expired ? 'expired' : 'sent' },
+          },
+          match.revision,
+        );
+        console.info(
+          JSON.stringify({
+            event: expired ? 'platform_result_expired' : 'platform_result_sent',
+            code: match.code,
+          }),
+        );
+      } catch {
+        console.warn(JSON.stringify({ event: 'platform_result_pending', code: match.code }));
+      }
+    }
+  }
   async list(playerId: string, completed: boolean, offset: number) {
     const rows = await this.store.list(playerId, this.environment, completed, offset);
     return {
@@ -63,8 +158,11 @@ export class Matches {
   }
   async join(code: string, player: Player): Promise<Match> {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const match = await this.get(code);
+      let match = await this.get(code);
+      if (match.platform && match.players.length < 2)
+        match = await this.importPlatform(match.platform.id, match.code, player);
       if (match.players.some((p) => p.id === player.id)) return match;
+      if (match.platform) throw new MatchError('Join this match through LagosLife first.');
       if (match.players.length === 2) throw new MatchError('This game already has two players.');
       const next = { ...match, players: [...match.players, player], revision: match.revision + 1 };
       if (await this.store.save(next, match.revision)) return next;
