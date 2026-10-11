@@ -25,7 +25,7 @@ export type HistoryEntry = {
 };
 export type Game = {
   version: 1;
-  dictionary: string;
+  dictionary: typeof DICTIONARY_VERSION;
   mode: Mode;
   board: Board;
   bag: Tile[];

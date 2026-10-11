@@ -2584,3 +2584,89 @@
     }
   }
 }
+
+@layer components {
+  .friend-lobby {
+    color: #234b30;
+  }
+  .friend-lobby > p {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #65765d;
+  }
+  .friend-lobby form {
+    margin: 24px 0 16px;
+  }
+  .friend-lobby label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 9px;
+  }
+  .friend-code-input {
+    display: flex;
+    gap: 10px;
+  }
+  .friend-code-input input {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid #bbc9a9;
+    border-radius: 8px;
+    padding: 12px;
+    letter-spacing: 5px;
+    font-size: 19px;
+    font-weight: 800;
+    text-transform: uppercase;
+    background: #f7faef;
+  }
+  .friend-lobby small {
+    display: block;
+    font-size: 11px;
+    color: #718267;
+    line-height: 1.6;
+  }
+  .friend-error {
+    color: #a53730;
+    font-size: 12px;
+    line-height: 1.5;
+    width: 100%;
+  }
+  .friend-connection {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px;
+    background: #f2f8df;
+    border-block: 1px solid #d5e2bc;
+    flex-shrink: 0;
+  }
+  .friend-connection > div {
+    flex: 1;
+  }
+  .friend-connection strong {
+    display: block;
+    font-size: 12px;
+  }
+  .friend-connection span {
+    display: block;
+    font-size: 10px;
+    margin-top: 4px;
+    color: #607a4b;
+  }
+  .friend-connection .quiet-button {
+    font-size: 11px;
+  }
+  .invite-code {
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: #315a34;
+    user-select: text;
+  }
+  .mobile-player > span:not(.mobile-avatar) {
+    max-width: 105px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

@@ -16,7 +16,9 @@
     "verify": "npm run lint && npm run format:check && npm run test && npm run build",
     "lint": "oxlint --deny-warnings apps packages scripts",
     "format": "oxfmt --write .",
-    "format:check": "oxfmt --check ."
+    "format:check": "oxfmt --check .",
+    "dev:server": "npm run dev -w @word-lagos/server",
+    "start": "npm run start -w @word-lagos/server"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

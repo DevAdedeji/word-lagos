@@ -13,12 +13,14 @@ import {
   Sparkles,
   Trophy,
   WifiOff,
+  Users,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import {
   createGame,
+  emptyBoard,
   evaluateMove,
   exchangeTiles,
   makeLexicon,
@@ -32,8 +34,10 @@ import {
 import { loadGame, saveGame } from './storage';
 import WordFeedback from './WordFeedback';
 import ActionIcon from './ActionIcon';
+import { useFriendGame } from './multiplayer/useFriendGame';
+import FriendLobby from './multiplayer/FriendLobby';
 import type { BotMove } from '../../../packages/game-core/src/bot';
-type Modal = 'help' | 'new' | 'dictionary' | 'exchange' | 'history' | null;
+type Modal = 'help' | 'new' | 'dictionary' | 'exchange' | 'history' | 'friends' | null;
 const alphabet = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const freshGame = (): Game => createGame('computer', crypto.getRandomValues(new Uint32Array(1))[0]);
 const premiumNames = {
@@ -44,7 +48,25 @@ const premiumNames = {
   '': 'Empty',
 };
 export default function App() {
-  const [game, setGame] = useState<Game>(() => loadGame() ?? freshGame());
+  const [soloGame, setGame] = useState<Game>(() => loadGame() ?? freshGame());
+  const friend = useFriendGame();
+  const multiplayer = !!friend.code;
+  const game = multiplayer
+    ? (friend.snapshot ?? {
+        ...soloGame,
+        board: emptyBoard(),
+        scores: [0, 0],
+        history: [],
+        turn: 0,
+        status: 'playing' as const,
+        endReason: null,
+      })
+    : soloGame;
+  const bagCount = multiplayer ? (friend.snapshot?.bagCount ?? 0) : soloGame.bag.length;
+  const opponentName = multiplayer ? (friend.snapshot?.players[1]?.name ?? 'Friend') : 'Ayo';
+  const playerName = multiplayer ? (friend.snapshot?.players[0]?.name ?? 'You') : 'You';
+  const waiting = multiplayer && friend.snapshot?.phase === 'waiting';
+
   const [draft, setDraft] = useState<Placement[]>([]),
     [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<Modal>(null);
@@ -97,9 +119,16 @@ export default function App() {
   }
 
   const dictionary = useMemo(() => makeLexicon(wordsText), [wordsText]);
-  const isThinking = game.turn === 1 && game.status === 'playing';
-  const canPlay = !!wordsText && !loadError && !isThinking && game.status === 'playing';
-  const rack = game.racks[0];
+  const opponentTurn = game.turn === 1 && game.status === 'playing';
+  const isThinking = !multiplayer && opponentTurn;
+  const canPlay =
+    !!wordsText &&
+    !loadError &&
+    !opponentTurn &&
+    game.status === 'playing' &&
+    (!multiplayer ||
+      (friend.status === 'connected' && !friend.pending && friend.snapshot?.phase === 'playing'));
+  const rack = multiplayer ? (friend.snapshot?.rack ?? []) : soloGame.racks[0];
   const orderedRack = [...rack].sort((a, b) => rackOrder.indexOf(a.id) - rackOrder.indexOf(b.id));
   const preview = useMemo(
     () => evaluateMove(game.board, rack, draft, dictionary),
@@ -128,8 +157,8 @@ export default function App() {
     return () => controller.abort();
   }, [loadAttempt]);
   useEffect(() => {
-    setSaveError(!saveGame(game));
-  }, [game]);
+    setSaveError(!saveGame(soloGame));
+  }, [soloGame]);
   useEffect(() => {
     if (!isThinking || !wordsText) return;
     setBotError('');
@@ -153,17 +182,17 @@ export default function App() {
       try {
         let next: Game;
         if (event.data.move) {
-          next = playMove(game, event.data.move.placements, dictionary);
+          next = playMove(soloGame, event.data.move.placements, dictionary);
           const move = next.history.at(-1)!;
           setMessage(`Ayo played ${move.words.join(' + ')} for ${move.score} points.`);
-        } else if (game.bag.length >= 7) {
+        } else if (bagCount >= 7) {
           next = exchangeTiles(
-            game,
-            game.racks[1].map((t) => t.id),
+            soloGame,
+            soloGame.racks[1].map((t) => t.id),
           );
           setMessage('Ayo swapped tiles. Your turn.');
         } else {
-          next = passTurn(game);
+          next = passTurn(soloGame);
           setMessage('Ayo passed. Your turn.');
         }
         setGame(next);
@@ -178,7 +207,7 @@ export default function App() {
     worker.postMessage({
       id: game.history.length,
       board: game.board,
-      rack: game.racks[1],
+      rack: soloGame.racks[1],
       words: wordsText,
     });
     return () => {
@@ -186,7 +215,7 @@ export default function App() {
       window.clearTimeout(timer);
       worker.terminate();
     };
-  }, [game, isThinking, wordsText, dictionary, retry]);
+  }, [soloGame, isThinking, wordsText, dictionary, retry]);
   useEffect(() => {
     if (!modal && !blank) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -220,6 +249,12 @@ export default function App() {
       previous?.focus();
     };
   }, [modal, blank]);
+  useEffect(() => {
+    setDraft([]);
+    setSelected(null);
+    setBlank(null);
+    setMessage('');
+  }, [friend.code, friend.snapshot?.revision]);
   function clearDraft() {
     setDraft([]);
     setSelected(null);
@@ -250,17 +285,20 @@ export default function App() {
     setMessage('');
     setBlank(null);
   }
-  function submit() {
+  async function submit() {
     try {
-      setGame(playMove(game, draft, dictionary));
+      if (multiplayer) await friend.send({ kind: 'play', placements: draft });
+      else setGame(playMove(soloGame, draft, dictionary));
       clearDraft();
     } catch (e) {
       setMessage((e as Error).message);
     }
   }
-  function action(kind: 'pass' | 'exchange') {
+  async function action(kind: 'pass' | 'exchange') {
     try {
-      setGame(kind === 'pass' ? passTurn(game) : exchangeTiles(game, swapIds));
+      if (multiplayer)
+        await friend.send(kind === 'pass' ? { kind: 'pass' } : { kind: 'exchange', ids: swapIds });
+      else setGame(kind === 'pass' ? passTurn(soloGame) : exchangeTiles(soloGame, swapIds));
       clearDraft();
       setModal(null);
       setSwapIds([]);
@@ -270,6 +308,7 @@ export default function App() {
     }
   }
   function start() {
+    friend.leave();
     setGame(freshGame());
     clearDraft();
     setRackOrder([]);
@@ -296,7 +335,7 @@ export default function App() {
       ? 'A well-matched draw.'
       : game.scores[0] > game.scores[1]
         ? 'You’ve got a way with words.'
-        : 'Ayo takes this one.';
+        : `${opponentName} takes this one.`;
   return (
     <div ref={appRef} className="app-shell min-h-screen bg-paper text-forest">
       <header className="mobile-game-header">
@@ -315,10 +354,10 @@ export default function App() {
           </button>
         </div>
         <div className="mobile-scoreboard">
-          <div className={`mobile-player ${!isThinking ? 'current-player' : ''}`}>
+          <div className={`mobile-player ${!opponentTurn ? 'current-player' : ''}`}>
             <span className="mobile-avatar">Y</span>
             <span>
-              You
+              {playerName}
               <strong>
                 {game.scores[0]}
                 {preview.ok && <small>+{preview.score}</small>}
@@ -328,9 +367,9 @@ export default function App() {
           <span className="versus-tile">
             W<span>L</span>
           </span>
-          <div className={`mobile-player opponent ${isThinking ? 'current-player' : ''}`}>
+          <div className={`mobile-player opponent ${opponentTurn ? 'current-player' : ''}`}>
             <span>
-              Ayo
+              {opponentName}
               <strong>{game.scores[1]}</strong>
             </span>
             <span className="mobile-avatar bot-avatar">
@@ -342,17 +381,27 @@ export default function App() {
           className={`mobile-play-status ${draft.length && !preview.ok ? 'invalid-play-status' : ''}`}
           role="status"
         >
-          {finished
-            ? outcome
-            : !wordsText
-              ? 'Loading dictionary…'
-              : isThinking
-                ? 'Ayo is thinking…'
-                : draft.length
-                  ? preview.ok
-                    ? `${preview.words.map((w) => w.word).join(' + ')} · ${preview.score} points`
-                    : preview.error
-                  : message || 'Your turn · Make your next word count'}
+          {multiplayer && friend.status !== 'connected'
+            ? friend.status === 'connecting'
+              ? 'Connecting…'
+              : 'Connection lost · Reconnect below'
+            : waiting
+              ? 'Waiting for your friend to join'
+              : friend.pending
+                ? 'Submitting…'
+                : finished
+                  ? outcome
+                  : !wordsText
+                    ? 'Loading dictionary…'
+                    : isThinking
+                      ? 'Ayo is thinking…'
+                      : multiplayer && opponentTurn
+                        ? `${opponentName}’s turn`
+                        : draft.length
+                          ? preview.ok
+                            ? `${preview.words.map((w) => w.word).join(' + ')} · ${preview.score} points`
+                            : preview.error
+                          : message || 'Your turn · Make your next word count'}
         </div>
       </header>
       <header className="site-header">
@@ -399,9 +448,11 @@ export default function App() {
             <div className="board-toolbar">
               <div className="mode-label">
                 <span className="live-dot" />
-                You vs. Ayo
+                You vs. {opponentName}
                 <span className="mode-separator">/</span>
-                <span className="casual-label">Friendly computer</span>
+                <span className="casual-label">
+                  {multiplayer ? `Code: ${friend.code}` : 'Friendly computer'}
+                </span>
               </div>
               <button
                 className="icon-button zoom-button"
@@ -423,6 +474,38 @@ export default function App() {
                 <span>Word check</span>
               </button>
             </div>
+            {multiplayer && (
+              <div className="friend-connection" role="status">
+                <div>
+                  <strong>{waiting ? 'Invite your friend' : `Game ${friend.code}`}</strong>
+                  <span>
+                    {waiting
+                      ? 'Share this code to start playing'
+                      : friend.status === 'connected'
+                        ? friend.snapshot?.players[1]?.online
+                          ? 'Your friend is connected'
+                          : 'Your friend is offline · Moves are saved'
+                        : 'Reconnecting to your saved game'}
+                  </span>
+                </div>
+                {waiting && <b className="invite-code">{friend.code}</b>}
+                {friend.error && <p className="friend-error">{friend.error}</p>}
+                {friend.status === 'disconnected' && (
+                  <button className="new-game-button" onClick={friend.reconnect}>
+                    Reconnect
+                  </button>
+                )}
+                <button
+                  className="quiet-button"
+                  onClick={() => {
+                    friend.leave();
+                    clearDraft();
+                  }}
+                >
+                  Back to Ayo
+                </button>
+              </div>
+            )}
             <div ref={boardScrollRef} className={`board-scroll ${zoom ? 'is-zoomed' : ''}`}>
               <div className="board-frame">
                 <div className="board" role="group" aria-label="15 by 15 word board">
@@ -495,7 +578,7 @@ export default function App() {
                     {preview.ok && <b className="projected-score">+{preview.score}</b>}
                   </span>
                   <span className="rack-opponent">
-                    Ayo <strong>{game.scores[1]}</strong>
+                    {opponentName} <strong>{game.scores[1]}</strong>
                   </span>
                   <span className="rack-count">{rack.length - draft.length} tiles</span>
                 </span>
@@ -551,7 +634,15 @@ export default function App() {
                   </span>
                 ) : !wordsText ? (
                   'Getting the word list ready…'
-                ) : botError ? (
+                ) : multiplayer && (waiting || opponentTurn || friend.pending) ? (
+                  waiting ? (
+                    'Share your code to invite a friend.'
+                  ) : friend.pending ? (
+                    'Submitting your move…'
+                  ) : (
+                    `${opponentName}’s turn`
+                  )
+                ) : botError && !multiplayer ? (
                   <span>
                     {botError} <button onClick={() => setRetry((n) => n + 1)}>Retry turn</button>
                   </span>
@@ -595,7 +686,7 @@ export default function App() {
                     setSwapIds([]);
                     setModal('exchange');
                   }}
-                  disabled={!canPlay || game.bag.length < 7}
+                  disabled={!canPlay || bagCount < 7}
                 >
                   <Shuffle size={24} />
                 </ActionIcon>
@@ -607,7 +698,8 @@ export default function App() {
                   <SkipForward size={24} />
                 </ActionIcon>
                 <button className="play-button" onClick={submit} disabled={!canPlay || !preview.ok}>
-                  Submit {preview.ok && <span>+{preview.score}</span>}
+                  {friend.pending ? 'Submitting…' : 'Submit'}{' '}
+                  {preview.ok && <span>+{preview.score}</span>}
                   <ArrowRight size={17} />
                 </button>
               </div>
@@ -619,7 +711,7 @@ export default function App() {
                 <h2>Your table</h2>
                 <span className="pill">{finished ? 'FINISHED' : 'SOLO SESSION'}</span>
               </div>
-              <div className={`player-row ${!isThinking && !finished ? 'active-player' : ''}`}>
+              <div className={`player-row ${!opponentTurn && !finished ? 'active-player' : ''}`}>
                 <div className="avatar you-avatar">Y</div>
                 <div className="player-info">
                   <h3>
@@ -637,21 +729,29 @@ export default function App() {
                 </div>
                 <strong className="player-score">{game.scores[0]}</strong>
               </div>
-              <div className={`player-row ${isThinking ? 'active-player' : ''}`}>
+              <div className={`player-row ${opponentTurn ? 'active-player' : ''}`}>
                 <div className="avatar ayo-avatar">
                   <Sparkles size={21} />
                 </div>
                 <div className="player-info">
                   <h3>
-                    Ayo <span>Computer</span>
+                    {opponentName} <span>{multiplayer ? 'Friend' : 'Computer'}</span>
                   </h3>
-                  <p>{isThinking ? 'Thinking of something good…' : 'Your friendly word rival'}</p>
+                  <p>
+                    {multiplayer
+                      ? opponentTurn
+                        ? 'Their turn'
+                        : 'Your turn'
+                      : isThinking
+                        ? 'Thinking of something good…'
+                        : 'Your friendly word rival'}
+                  </p>
                 </div>
                 <strong className="player-score">{game.scores[1]}</strong>
               </div>
               <div className="match-stats">
                 <div>
-                  <span>{game.bag.length}</span>
+                  <span>{bagCount}</span>
                   <p>Tiles in the bag</p>
                 </div>
                 <div>
@@ -660,7 +760,11 @@ export default function App() {
                 </div>
               </div>
               <div className="save-status">
-                {saveError ? (
+                {multiplayer ? (
+                  <>
+                    <Check size={13} /> Accepted moves saved on the server
+                  </>
+                ) : saveError ? (
                   <>
                     <WifiOff size={13} /> Saving unavailable in this browser
                   </>
@@ -744,7 +848,7 @@ export default function App() {
                                 : 'Swapped tiles'}
                           </strong>
                           <span>
-                            {h.player ? 'Ayo' : 'You'} · Turn {game.history.length - i}
+                            {h.player ? opponentName : 'You'} · Turn {game.history.length - i}
                           </span>
                         </div>
                         <b>{h.kind === 'play' ? `+${h.score}` : '—'}</b>
@@ -779,7 +883,7 @@ export default function App() {
             MADE FOR THE LOVE OF WORDS <span>✳</span>
           </span>
           <span>
-            Solo edition <span className="footer-dot">·</span> Friends at the table, soon.
+            A little wordplay <span className="footer-dot">·</span> Better with friends.
           </span>
         </footer>
       </main>
@@ -823,18 +927,29 @@ export default function App() {
                   ))}
                 </div>
               </>
+            ) : modal === 'friends' ? (
+              <FriendLobby
+                onJoin={(code) => {
+                  friend.join(code);
+                  clearDraft();
+                  setModal(null);
+                }}
+              />
             ) : modal === 'new' ? (
               <>
                 <div className="eyebrow">PULL UP A CHAIR</div>
                 <h2 id="dialog-title">A fresh board awaits.</h2>
                 <p>
-                  Play against Ayo, your computer opponent.
-                  {game.history.length > 0 && !finished
+                  Challenge a friend or play against Ayo.
+                  {!multiplayer && game.history.length > 0 && !finished
                     ? ' Starting again replaces your saved game.'
                     : ''}
                 </p>
-                <button className="play-button modal-primary" onClick={start}>
-                  Let’s play <ArrowRight size={18} />
+                <button className="play-button modal-primary" onClick={() => setModal('friends')}>
+                  <Users size={18} /> Play a friend
+                </button>
+                <button className="new-game-button modal-primary" onClick={start}>
+                  Play against Ayo <ArrowRight size={18} />
                 </button>
               </>
             ) : modal === 'history' ? (
@@ -843,7 +958,7 @@ export default function App() {
                 <h2 id="dialog-title">{finished ? outcome : 'The word trail'}</h2>
                 <p>
                   You: {game.scores[0]}
-                  {` · Ayo: ${game.scores[1]}`} · {game.bag.length} tiles left
+                  {` · ${opponentName}: ${game.scores[1]}`} · {bagCount} tiles left
                 </p>
                 {finished && <p>Remaining tile values have been deducted from the final scores.</p>}
                 <ol className="history-list">
@@ -861,7 +976,7 @@ export default function App() {
                                 : 'Swapped tiles'}
                           </strong>
                           <span>
-                            {h.player ? 'Ayo' : 'You'} · Turn {game.history.length - i}
+                            {h.player ? opponentName : 'You'} · Turn {game.history.length - i}
                           </span>
                         </div>
                         <b>{h.score ? `+${h.score}` : '—'}</b>

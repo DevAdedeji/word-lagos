@@ -6,3 +6,5 @@ dist
 !.env.example
 coverage
 apps/web/public/words.txt
+
+apps/server/.data

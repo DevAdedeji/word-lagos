@@ -8,6 +8,8 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@word-lagos/game-core": "*"
+    "@colyseus/sdk": "^0.17.43",
+    "@word-lagos/game-core": "*",
+    "@word-lagos/multiplayer": "^0.1.0"
   }
 }

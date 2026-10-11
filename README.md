@@ -1,10 +1,10 @@
 # Word Lagos
 
-A mobile-first word board game, built as the solo milestone for a future LagosLife integration.
+A mobile-first word board game for LagosLife: play against Ayo or invite a friend.
 
 ## Run locally
 
-Requires Node.js 24+ and npm.
+Requires Node.js 24+ and npm. From the repository root:
 
 ```sh
 npm ci
@@ -12,51 +12,76 @@ npm run dictionary
 npm run dev
 ```
 
-Open http://127.0.0.1:43127. To use another port: `npm run dev -w @word-lagos/web -- --port 43128`.
+In a second terminal:
+
+```sh
+npm run dev:server
+```
+
+Open http://127.0.0.1:43127. New game → Play a friend → Create a game produces a six-letter code. Open a second tab and choose Join with that code. Local tabs receive separate development player sessions; production uses LagosLife identities. Development tokens and the last match code use sessionStorage: reload retains your seat, but closing the tab may clear the development identity.
+
+The server reads the root `.env`. Without `DATABASE_URL`, development uses an embedded PostgreSQL-compatible PGlite database in `apps/server/.data`. Both are ignored by Git. Add a Neon pooled connection string as `DATABASE_URL` to use PostgreSQL instead, retaining its SSL parameters. Use a separate Neon development branch for local work. Never prefix server secrets with `VITE_`.
 
 ## Available now
 
-- Play against Ayo, a friendly computer opponent.
-- A 15×15 board, 100-tile bag, seven-tile rack, blanks, letter/word premiums, cross-word validation, and seven-tile bonuses.
-- Tap-to-place on mobile; mouse dragging and keyboard-accessible buttons on desktop.
-- A full-screen mobile game with a full-width board by default, zoom and pan, larger tiles, a pinned rack with safe-area support, and a prominent Submit action. Rounded green/red outlines enclose valid/invalid words directly on the board, with score markers attached.
-- Recall, shuffle, swap, pass, word lookup, move history, endgame settlement, and new-game confirmation.
-- Local saves after every completed turn. Pending tile arrangements are intentionally not saved. Reloading during Ayo’s turn restarts its move search.
-- The computer searches legal moves in a Web Worker, with a retry action if computation fails. It chooses a middling scoring move for a gentler opponent.
+- Play against Ayo, with legal-move search in a Web Worker.
+- Friendly two-player matches with invitation codes, private racks, live turn/score updates, automatic reconnect attempts and manual reconnect.
+- Server validation of identity, membership, turn, tile ownership, words and scores. Revision checks and command receipts prevent concurrent or duplicate moves from being applied twice.
+- Accepted multiplayer moves persist before acknowledgment. Disconnecting keeps the seat reserved; return with the same identity and code. Matches expire after seven days. There is no turn clock or disconnect forfeiture yet.
+- A full-width, zoomable 15×15 board, 100-tile bag, blanks, premiums, crossing words and seven-tile bonuses.
+- Phone-first layout with a pinned rack, prominent Submit, on-board word outlines, and recall/swap/pass icons with title-only tooltips.
+- Local Ayo saves, word lookup, move history, endgame settlement and retry states.
 
-## Stack and structure
+Pending tile arrangements are not saved. Multiplayer responses never include bag contents, the random generator state, or the opponent's rack. Client scoring previews are advisory; the server validates using its own dictionary and game state.
 
-React, Vite, TypeScript, Tailwind CSS v4, Lucide icons, Zod, Vitest, oxlint, and oxfmt. Tailwind utilities and component-layer `@apply` rules handle shared styling; custom CSS handles the board geometry, tile treatments, and responsive rack.
+## Stack
+
+React, Vite, TypeScript, Tailwind CSS v4, Lucide, Zod, Colyseus, Express, Drizzle, PostgreSQL, Vitest, oxlint and oxfmt. PGlite runs the same PostgreSQL table definitions in local development and automated tests.
 
 ```text
-apps/web/src/             React interface, worker, and validated local saves
-packages/game-core/src/  Pure rules, scoring, game lifecycle, and bot search
-scripts/                 Dictionary preparation
+apps/web/src/                  Board, mobile UI, Ayo worker, local saves
+apps/web/src/multiplayer/      Friend lobby, connection and session lifecycle
+apps/server/src/               Auth, match rules, rooms, database and HTTP server
+packages/game-core/src/        Shared scoring, game lifecycle and bot search
+packages/multiplayer/src/      Validated client/server protocol
+scripts/                      Dictionary preparation
 ```
 
-The shared engine has no React, browser, or database dependencies. It can later run on an authoritative multiplayer server.
+## Railway + Neon deployment
+
+Deploy **one Railway service** from `DevAdedeji/word-lagos`, using the repository root. The Dockerfile builds the web app; Node serves it on Railway's assigned `PORT`. `railway.json` configures the Docker build, `/health` check and one replica.
+
+1. Initially set `AUTH_MODE=disabled`. Ayo works; multiplayer displays an unavailable message until LagosLife is connected. No platform secret is needed to obtain the public URL.
+2. Generate a public HTTPS domain in Railway. Use the root URL in the LagosLife draft's **Game URL** field. The server sends the required `frame-ancestors` header without `X-Frame-Options`. Webhook URL can remain blank for this milestone.
+3. Create a Neon database in a region near the Railway service. Add its complete pooled URL as `DATABASE_URL` in Railway Variables, retaining the supplied SSL settings. The local `.env` is excluded from Git and the Docker image.
+4. Add `VATAR_GAME_ID`, `VATAR_SECRET` (test secret), `PUBLIC_ORIGIN` (exact Railway HTTPS origin, no trailing slash) and `AUTH_MODE=vatar` in Railway Variables. Redeploy.
+5. Open the LagosLife sandbox to test real identities. `Vatar.init()` and `Vatar.session()` supply tokens; our server checks them through `/session/verify`, including game ID, expiry and test/live mode. No second signup or third-party cookies are used.
+
+Production rejects local development identities. Test, live and local games are isolated, even in a shared database. An initial additive schema is created at startup; future changes require versioned migrations.
+
+### Current integration boundary
+
+This milestone supplies **our own friendly invitation codes and game rooms**. It does not yet call `Vatar.match.create/join`, post signed platform match results, or implement stakes, purchases, webhooks or platform leaderboards. Platform matchmaking and signed results are the next integration step, to test with the real draft and test keys before LagosLife submission. Names are supported; platform avatars are not yet shown.
+
+Use **one application replica** for now. Room connections live in one Node process; database revision checks protect saved moves. A restart drops connections, which reauthenticate and recreate rooms from persisted matches. Horizontal scaling needs shared Colyseus presence and routing. On an unconfirmed move, reconnect to inspect the saved board before retrying. Do not expose local development authentication publicly.
 
 ## Checks
 
 ```sh
-npm run lint          # oxlint, warnings fail
-npm run format        # oxfmt writes formatting
-npm run format:check  # oxfmt checks formatting
-npm run test          # rules, bot, full-dictionary game, and saved-game tests
-npm run build         # dictionary generation, TypeScript check, production build
-npm run verify        # all release checks
+npm run lint
+npm run format
+npm run format:check
+npm run test
+npm run build
+npm run verify
 ```
 
-Browser smoke checks: play a valid centre word and observe the computer reply; place an invalid word and verify Submit is disabled; recall tiles; swap; use word lookup; reload and verify scores persist; start a new match against Ayo; verify six consecutive scoreless turns finish a game. At 375×812 and 320×740, verify the board fills the width and scrolls vertically in short embeds, zoom/pan enlarges the squares, the rack stays pinned, and dialogs appear above it.
+Tests cover game rules, bot play, local saves, multiplayer membership, rack privacy, turn validation, concurrent seat reservation, optimistic writes, duplicate commands, Vatar verification failures, environment isolation and actual WebSocket clients reconnecting. Database tests use PGlite; live Neon and LagosLife sandbox validation still require configuration.
 
-For a development-only iframe check, open `http://127.0.0.1:43127/embed-preview.html`. It reserves a 56px host bar and uses the sandbox permissions documented by LagosLife. This simulates the available space; actual Vatar sandbox integration remains a separate milestone.
+Phone QA: http://127.0.0.1:43127/embed-preview.html provides a 390px iframe preview with a 56px host bar. Create/join from separate tabs, submit a word, check both scores, pass/swap on the active turn, and reload to resume. The board fills the width and scrolls in short embeds; the rack remains pinned.
 
 ## Dictionary
 
-The build uses **word-list 4.1.0**, pinned in package.json and package-lock.json. It contains 269,870 alphabetic entries of length 2–15 after filtering. This is a casual English word list, not an official Scrabble tournament dictionary. Dictionary source licensing and credits are copied to `apps/web/public/dictionary-license.txt` and shipped with the game. Regenerate with `npm run dictionary` after installing dependencies. The generated word file is ignored by Git and regenerated for production builds.
+**word-list 4.1.0**, pinned in the lockfile, supplies 269,870 alphabetic entries of length 2–15. This is a casual English list, not an official tournament dictionary. Licensing ships in `apps/web/public/dictionary-license.txt`. The build regenerates the ignored `words.txt` for browser and server.
 
-## Next milestone
-
-Friend matches, Node.js/Colyseus rooms, PostgreSQL/Drizzle persistence, and Vatar SDK integration are not implemented yet. Those should verify LagosLife sessions on the server, keep racks private, commit moves atomically, recover from disconnects, and report signed results. Current scores and saves are browser-local and are not suitable for a competitive leaderboard.
-
-No platform keys or database credentials are required for this solo version. It has not been deployed or submitted to LagosLife. Fonts load from Google Fonts with local fallbacks.
+This task has not deployed the project or submitted it to LagosLife. Fonts load from Google Fonts with local fallbacks.

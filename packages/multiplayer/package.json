@@ -4,5 +4,8 @@
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
-  "dependencies": {"@word-lagos/game-core": "*", "zod": "^4.0.0"}
+  "dependencies": {
+    "@word-lagos/game-core": "*",
+    "zod": "^4.0.0"
+  }
 }
