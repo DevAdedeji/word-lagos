@@ -1,7 +1,7 @@
 export const SIZE = 15;
 export const RACK_SIZE = 7;
 export const DICTIONARY_VERSION = 'word-list-4.1.0';
-export type Mode = 'computer';
+export type Mode = 'computer' | 'friends';
 export type Tile = { id: string; letter: string };
 export type BoardTile = Tile & { blank: boolean };
 export type Board = (BoardTile | null)[][];
