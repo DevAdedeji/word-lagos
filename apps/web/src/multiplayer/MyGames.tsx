@@ -74,6 +74,7 @@ export default function MyGames({
   }, [tab, offset, attempt, recordCode]);
   function showRecord(code: string) {
     setRecord(null);
+    setBusy(true);
     setRecordCode(code);
   }
   return (
@@ -94,7 +95,8 @@ export default function MyGames({
             <div className="eyebrow">HEAD TO HEAD</div>
             <h2 id="dialog-title">You &amp; {record?.opponent ?? 'your padi'}</h2>
           </div>
-          <div className="games-scroll" key="record">
+          <div className="games-scroll" key="record" aria-busy={busy}>
+            {busy && !record && <GamesSkeleton record />}
             {record && (
               <>
                 <p>
@@ -151,6 +153,7 @@ export default function MyGames({
                 aria-pressed={tab === 'active'}
                 onClick={() => {
                   if (tab === 'active') return;
+                  setBusy(true);
                   setNextOffset(null);
                   setTab('active');
                   setOffset(0);
@@ -163,6 +166,7 @@ export default function MyGames({
                 aria-pressed={tab === 'records'}
                 onClick={() => {
                   if (tab === 'records') return;
+                  setBusy(true);
                   setNextOffset(null);
                   setTab('records');
                   setOffset(0);
@@ -173,7 +177,7 @@ export default function MyGames({
               </button>
             </div>
           </div>
-          <div className="games-scroll" key={tab}>
+          <div className="games-scroll" key={tab} aria-busy={busy}>
             <ul className="game-list">
               {tab === 'active' && computer.status === 'playing' && (
                 <li className="game-list-card">
@@ -234,6 +238,7 @@ export default function MyGames({
                 </li>
               ))}
             </ul>
+            {busy && <GamesSkeleton />}
             {!busy && !error && !games.length && (
               <p>
                 {tab === 'records'
@@ -262,7 +267,6 @@ export default function MyGames({
           </div>
         </>
       )}
-      {busy && <p role="status">Loading {recordCode ? 'your record' : 'friend games'}…</p>}
       {error && (
         <div role="alert">
           <p className="friend-error">{error}</p>
@@ -280,4 +284,42 @@ function resultLabel(game: GameSummary) {
     : game.scores[0] > game.scores[1]
       ? 'You won'
       : 'They won';
+}
+
+function GamesSkeleton({ record = false }: { record?: boolean }) {
+  return (
+    <div role="status" className="py-3">
+      <span className="sr-only">Loading {record ? 'your record' : 'friend games'}…</span>
+      <div aria-hidden="true" className="space-y-3 motion-safe:animate-pulse">
+        {record && (
+          <>
+            <div className="h-3 w-3/5 rounded bg-[#dce4d2]" />
+            <div className="grid grid-cols-3 gap-2 py-3">
+              {[0, 1, 2].map((index) => (
+                <div
+                  key={index}
+                  className="flex h-24 flex-col items-center justify-center gap-3 rounded-xl bg-[#e9efdc]"
+                >
+                  <div className="h-7 w-9 rounded bg-[#d2dec2]" />
+                  <div className="h-2.5 w-3/5 rounded bg-[#d2dec2]" />
+                </div>
+              ))}
+            </div>
+            <div className="h-3 w-28 rounded bg-[#dce4d2]" />
+          </>
+        )}
+        {[0, 1, 2].map((index) => (
+          <div key={index} className="game-list-card flex items-center gap-3 p-4">
+            {!record && <div className="h-11 w-11 shrink-0 rounded-xl bg-[#dce8c9]" />}
+            <div className="flex-1 space-y-3">
+              <div className="h-4 w-2/3 rounded bg-[#d2dec2]" />
+              <div className="h-2.5 w-1/2 rounded bg-[#dce4d2]" />
+              {!record && <div className="h-2.5 w-3/5 rounded bg-[#dce4d2]" />}
+            </div>
+            <div className={`${record ? 'w-12' : 'w-4'} h-4 rounded bg-[#dce4d2]`} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

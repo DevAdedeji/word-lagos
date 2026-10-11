@@ -1,7 +1,9 @@
 import type { Store } from './store';
 import { Vatar, VatarError } from './vatar';
 
-export const themeProduct = { id: 'sunset_board', name: 'Sunset board', price: 100 };
+export const themeProduct = { id: 'sunset_board', name: 'Sunset board', price: 500 };
+// Keep purchases made at the original price restorable after the price change.
+const themePrices = new Set([100, themeProduct.price]);
 export class Purchases {
   constructor(
     private store: Store,
@@ -12,7 +14,7 @@ export class Purchases {
     if (
       purchase.playerId !== playerId ||
       purchase.productId !== themeProduct.id ||
-      purchase.amount !== themeProduct.price
+      !themePrices.has(purchase.amount)
     )
       throw new VatarError('This purchase does not belong to this player or product.');
     if (purchase.status === 'refunded') {
@@ -29,7 +31,7 @@ export class Purchases {
       if (
         purchase.playerId !== playerId ||
         purchase.productId !== themeProduct.id ||
-        purchase.amount !== themeProduct.price
+        !themePrices.has(purchase.amount)
       )
         throw new VatarError('Your theme ownership could not be confirmed.');
       if (purchase.status === 'refunded')

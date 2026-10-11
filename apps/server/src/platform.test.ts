@@ -19,7 +19,7 @@ const purchase = (id: string, playerId = 'buyer') => ({
   id,
   playerId,
   productId: 'sunset_board',
-  amount: 100,
+  amount: 500,
   currency: 'NGN',
   status: 'paid',
   mode: 'test',
@@ -50,6 +50,18 @@ describe('verified cosmetic purchases', () => {
     expect(await service.owned('buyer')).toBe(true);
     expect(await store.pendingPurchases('test')).toEqual([]);
     expect(await store.ownsTheme('buyer', 'live')).toBe(false);
+  });
+  it('preserves ownership bought at the original price', async () => {
+    const id = randomUUID(),
+      player = randomUUID();
+    const provider = new Vatar('vtr_test_secret', undefined, async (url) =>
+      String(url).endsWith('/deliver')
+        ? json({ id, status: 'delivered' })
+        : json({ ...purchase(id, player), amount: 100 }),
+    );
+    const service = new Purchases(store, provider);
+    await service.claim(player, id);
+    expect(await service.owned(player)).toBe(true);
   });
   it('rejects wrong owners, products, amounts, modes and unpaid responses without granting', async () => {
     for (const patch of [
