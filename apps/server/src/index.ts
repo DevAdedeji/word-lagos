@@ -27,13 +27,10 @@ if (production && config.AUTH_MODE === 'local')
 if (
   config.AUTH_MODE === 'vatar' &&
   (!config.VATAR_SECRET?.match(/^vtr_(test|live)_/) ||
-    !config.VATAR_GAME_ID ||
     !config.DATABASE_URL ||
     !config.PUBLIC_ORIGIN)
 )
-  throw new Error(
-    'Vatar mode requires VATAR_SECRET, VATAR_GAME_ID, DATABASE_URL, and PUBLIC_ORIGIN.',
-  );
+  throw new Error('Vatar mode requires VATAR_SECRET, DATABASE_URL, and PUBLIC_ORIGIN.');
 if (production && config.PUBLIC_ORIGIN && new URL(config.PUBLIC_ORIGIN).protocol !== 'https:')
   throw new Error('Production requires an HTTPS public origin.');
 const store = await openStore(

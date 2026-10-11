@@ -123,6 +123,33 @@ describe('identity boundary', () => {
     const issued = await auth.issueLocal();
     expect((await auth.verify(issued.token)).name).toBe(issued.name);
   });
+  it('verifies with the game-scoped secret without a configured game ID', async () => {
+    const valid = {
+      playerId: 't_abc',
+      name: 'Ada',
+      gameId: 'provider-game-id',
+      mode: 'test',
+      exp: Date.now() + 60000,
+    };
+    let response: unknown = valid;
+    let status = 200;
+    const request: typeof fetch = async (url, options) => {
+      expect(url).toBe('https://lagoslife.app/api/games/v1/session/verify');
+      expect(options?.method).toBe('POST');
+      expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer vtr_test_example');
+      expect(JSON.parse(String(options?.body))).toEqual({ session: 'signed-token-example' });
+      return new Response(JSON.stringify(response), { status });
+    };
+    const vatar = new Auth('vatar', store, 'vtr_test_example', undefined, request);
+    expect((await vatar.verify('signed-token-example')).id).toBe('t_abc');
+    for (const invalid of [{ ...valid, mode: 'live' }, { ...valid, exp: 0 }, {}]) {
+      response = invalid;
+      await expect(vatar.verify('signed-token-example')).rejects.toThrow('invalid');
+    }
+    response = { error: 'wrong_game' };
+    status = 403;
+    await expect(vatar.verify('signed-token-example')).rejects.toThrow('invalid');
+  });
   it('checks Vatar game, environment and expiry, and fails closed on outages', async () => {
     const valid = {
       playerId: 'p_abc',

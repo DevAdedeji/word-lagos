@@ -37,8 +37,10 @@ export class Auth {
       if (!player) throw new AuthError('This local session expired. Open a new player session.');
       return { ...player, expiresAt: Date.now() + 15 * 60000 };
     }
-    if (this.mode !== 'vatar' || !this.secret || !this.gameId)
+    if (this.mode !== 'vatar' || !this.secret)
       throw new AuthError('Friend matches will be available after LagosLife is connected.');
+    // The provider verifies game ownership using our game-scoped secret.
+    // An explicitly configured game ID adds an optional consistency check.
     let response: Response;
     try {
       response = await this.request('https://lagoslife.app/api/games/v1/session/verify', {
@@ -59,7 +61,7 @@ export class Auth {
     if (
       !parsed.success ||
       parsed.data.exp <= Date.now() ||
-      parsed.data.gameId !== this.gameId ||
+      (this.gameId && parsed.data.gameId !== this.gameId) ||
       parsed.data.mode !== expectedMode
     )
       throw new AuthError('LagosLife returned an invalid player session.');

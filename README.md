@@ -54,8 +54,8 @@ Deploy **one Railway service** from `DevAdedeji/word-lagos`, using the repositor
 1. Initially set `AUTH_MODE=disabled`. Ayo works; multiplayer displays an unavailable message until LagosLife is connected. No platform secret is needed to obtain the public URL.
 2. Generate a public HTTPS domain in Railway. Use the root URL in the LagosLife draft's **Game URL** field. The server sends the required `frame-ancestors` header without `X-Frame-Options`. Webhook URL can remain blank for this milestone.
 3. Create a Neon database in a region near the Railway service. Add its complete pooled URL as `DATABASE_URL` in Railway Variables, retaining the supplied SSL settings. The local `.env` is excluded from Git and the Docker image.
-4. Add `VATAR_GAME_ID`, `VATAR_SECRET` (test secret), `PUBLIC_ORIGIN` (exact Railway HTTPS origin, no trailing slash) and `AUTH_MODE=vatar` in Railway Variables. Redeploy.
-5. Open the LagosLife sandbox to test real identities. `Vatar.init()` and `Vatar.session()` supply tokens; our server checks them through `/session/verify`, including game ID, expiry and test/live mode. No second signup or third-party cookies are used.
+4. Add `VATAR_SECRET` (test secret), `PUBLIC_ORIGIN` (exact Railway HTTPS origin, no trailing slash) and `AUTH_MODE=vatar` in Railway Variables. Redeploy.
+5. Open the LagosLife sandbox to test real identities. `Vatar.init()` and `Vatar.session()` supply tokens; our server checks them through `/session/verify`, which verifies game ownership using the game-scoped secret. Our server also checks expiry and test/live mode. `VATAR_GAME_ID` is optional: if set, the returned ID must match. No second signup or third-party cookies are used.
 
 Production rejects local development identities. Test, live and local games are isolated, even in a shared database. An initial additive schema is created at startup; future changes require versioned migrations.
 
