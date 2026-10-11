@@ -1,6 +1,11 @@
 import { createHash, randomInt } from 'node:crypto';
 import { createGame, exchangeTiles, passTurn, playMove } from '@word-lagos/game-core';
-import { commandSchema, type Command, type Snapshot } from '@word-lagos/multiplayer';
+import {
+  commandSchema,
+  type Command,
+  type Snapshot,
+  type GameSummary,
+} from '@word-lagos/multiplayer';
 import type { Match, Player, Store } from './store';
 
 export class MatchError extends Error {}
@@ -10,6 +15,31 @@ export class Matches {
     private dictionary: ReadonlySet<string>,
     private environment: 'local' | 'test' | 'live' = 'local',
   ) {}
+  async list(playerId: string, completed: boolean, offset: number) {
+    const rows = await this.store.list(playerId, this.environment, completed, offset);
+    return {
+      games: rows.slice(0, 50).map((row) => summary(row, playerId)),
+      nextOffset: rows.length > 50 ? offset + 50 : null,
+    };
+  }
+  async record(code: string, playerId: string) {
+    // Completed games remain available as records after the invitation expires.
+    const match = await this.store.get(code);
+    if (
+      !match ||
+      match.environment !== this.environment ||
+      !match.players.some((p) => p.id === playerId)
+    )
+      throw new MatchError('This record is not available.');
+    const opponent = match.players.find((p) => p.id !== playerId);
+    if (!opponent) throw new MatchError('Your friend has not joined this game yet.');
+    const record = await this.store.record(playerId, opponent.id, this.environment);
+    return {
+      ...record,
+      opponent: opponent.name,
+      recent: record.recent.map((row) => summary(row, playerId)),
+    };
+  }
   async create(player: Player): Promise<Match> {
     for (let i = 0; i < 5; i++) {
       const match: Match = {
@@ -108,5 +138,18 @@ export function snapshot(match: Match, playerId: string, online: ReadonlySet<str
       .filter((p): p is Player => !!p)
       .map((p) => ({ name: p.name, online: online.has(p.id) })),
     expiresAt: match.expiresAt,
+  };
+}
+
+function summary(row: Awaited<ReturnType<Store['list']>>[number], playerId: string): GameSummary {
+  const seat = row.players.findIndex((p) => p.id === playerId);
+  if (seat < 0) throw new MatchError('This game is not available.');
+  return {
+    code: row.code,
+    opponent: row.players[1 - seat]?.name ?? null,
+    scores: [row.scores[seat], row.scores[1 - seat]],
+    phase: row.players.length < 2 ? 'waiting' : row.status,
+    yourTurn: row.status === 'playing' && row.players.length === 2 && row.turn === seat,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }

@@ -62,6 +62,30 @@ export async function startServer({
       next(e);
     }
   });
+  app.get('/api/friends', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await auth.verify(bearer(req));
+      const query = z
+        .object({
+          completed: z.enum(['true', 'false']).default('false'),
+          offset: z.coerce.number().int().min(0).max(100000).default(0),
+        })
+        .parse(req.query);
+      res.json(await matches.list(identity.id, query.completed === 'true', query.offset));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/friends/:code/record', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await auth.verify(bearer(req));
+      res.json(await matches.record(codeSchema.parse(req.params.code), identity.id));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post('/api/friends', async (req, res, next) => {
     try {
       const identity = await auth.verify(bearer(req));

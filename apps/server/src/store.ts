@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle as liteDrizzle } from 'drizzle-orm/pglite';
 import { drizzle as pgDrizzle } from 'drizzle-orm/node-postgres';
 import { integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, desc } from 'drizzle-orm';
 import pg from 'pg';
 import { z } from 'zod';
 import { boardSchema, historySchema, tileSchema, codeSchema } from '@word-lagos/multiplayer';
@@ -67,7 +67,66 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
   await db.execute(
     sql`CREATE TABLE IF NOT EXISTS local_sessions (hash text PRIMARY KEY, player jsonb NOT NULL, expires_at timestamptz NOT NULL)`,
   );
+  const owned = (playerId: string, environment: string) =>
+    and(
+      sql`${matches.data}->'players' @> ${JSON.stringify([{ id: playerId }])}::jsonb`,
+      sql`coalesce(${matches.data}->>'environment', 'local') = ${environment}`,
+    );
+  const finished = sql`${matches.data}->'game'->>'status' = 'finished'`;
+  const summaryColumns = {
+    code: matches.code,
+    players: sql<Player[]>`${matches.data}->'players'`,
+    scores: sql<number[]>`${matches.data}->'game'->'scores'`,
+    turn: sql<number>`(${matches.data}->'game'->>'turn')::int`,
+    status: sql<'playing' | 'finished'>`${matches.data}->'game'->>'status'`,
+    updatedAt: matches.updatedAt,
+  };
   return {
+    async list(playerId: string, environment: string, completed: boolean, offset: number) {
+      return db
+        .select(summaryColumns)
+        .from(matches)
+        .where(
+          and(
+            owned(playerId, environment),
+            completed
+              ? finished
+              : and(
+                  sql`${matches.data}->'game'->>'status' = 'playing'`,
+                  sql`(${matches.data}->>'expiresAt')::numeric > extract(epoch from now()) * 1000`,
+                ),
+          ),
+        )
+        .orderBy(desc(matches.updatedAt), desc(matches.code))
+        .limit(51)
+        .offset(offset);
+    },
+    async record(playerId: string, opponentId: string, environment: string) {
+      const pair = and(
+        owned(playerId, environment),
+        sql`${matches.data}->'players' @> ${JSON.stringify([{ id: opponentId }])}::jsonb`,
+        finished,
+      );
+      const scoreDifference = sql`CASE WHEN ${matches.data}->'players'->0->>'id' = ${playerId}
+        THEN (${matches.data}->'game'->'scores'->>0)::int - (${matches.data}->'game'->'scores'->>1)::int
+        ELSE (${matches.data}->'game'->'scores'->>1)::int - (${matches.data}->'game'->'scores'->>0)::int END`;
+      const [counts] = await db
+        .select({
+          played: sql<number>`count(*)::int`,
+          wins: sql<number>`count(*) filter (where (${scoreDifference}) > 0)::int`,
+          losses: sql<number>`count(*) filter (where (${scoreDifference}) < 0)::int`,
+          draws: sql<number>`count(*) filter (where (${scoreDifference}) = 0)::int`,
+        })
+        .from(matches)
+        .where(pair);
+      const recent = await db
+        .select(summaryColumns)
+        .from(matches)
+        .where(pair)
+        .orderBy(desc(matches.updatedAt), desc(matches.code))
+        .limit(20);
+      return { ...counts, recent };
+    },
     async get(code: string): Promise<Match | null> {
       const [row] = await db.select().from(matches).where(eq(matches.code, code));
       return row ? matchSchema.parse(row.data) : null;

@@ -32,7 +32,9 @@ The server reads the root `.env`. Without `DATABASE_URL`, development uses an em
 - Phone-first layout with a pinned rack, prominent Submit, on-board word outlines, and recall/swap/pass icons with title-only tooltips.
 - Local Ayo saves, word lookup, move history, endgame settlement and retry states.
 
-Pending tile arrangements are not saved. Multiplayer responses never include bag contents, the random generator state, or the opponent's rack. Client scoring previews are advisory; the server validates using its own dictionary and game state.
+My games lists your current Ayo game and active friend matches, with scores and turn indicators. Records shows completed friend games; head-to-head counts include all completed matches between the two players, with the latest 20 results shown. Active lists page in batches of 50.
+
+Unsubmitted tile arrangements are saved per game in this browser tab, including across reloads, until the board revision changes. Ayo progress is saved on this device; friend games resume using the same authenticated identity. Multiplayer responses never include bag contents, the random generator state, or the opponent's rack. Client scoring previews are advisory; the server validates using its own dictionary and game state.
 
 ## Stack
 
@@ -84,4 +86,4 @@ Phone QA: http://127.0.0.1:43127/embed-preview.html provides a 390px iframe prev
 
 **word-list 4.1.0**, pinned in the lockfile, supplies 269,870 alphabetic entries of length 2–15. This is a casual English list, not an official tournament dictionary. Licensing ships in `apps/web/public/dictionary-license.txt`. The build regenerates the ignored `words.txt` for browser and server.
 
-This task has not deployed the project or submitted it to LagosLife. Fonts load from Google Fonts with local fallbacks.
+The active-game switcher and head-to-head records need to be deployed before using the new listing screenshots. The game has not been submitted to LagosLife. Fonts load from Google Fonts with local fallbacks.

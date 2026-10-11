@@ -1,6 +1,6 @@
 import { Client, type Room } from '@colyseus/sdk';
 import { z } from 'zod';
-import { runtimeSchema, codeSchema } from '@word-lagos/multiplayer';
+import { runtimeSchema, codeSchema, gameListSchema, recordSchema } from '@word-lagos/multiplayer';
 
 interface VatarSDK {
   init(): Promise<{
@@ -102,4 +102,21 @@ export async function connectFriendGame(code: string): Promise<Room> {
   const room = await client.joinById(code, { code, session: token });
   room.reconnection.enabled = false;
   return room;
+}
+
+export async function listFriendGames(completed = false, offset = 0) {
+  const token = await session();
+  return gameListSchema.parse(
+    await jsonRequest(`/api/friends?completed=${completed}&offset=${offset}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  );
+}
+export async function playerRecord(code: string) {
+  const token = await session();
+  return recordSchema.parse(
+    await jsonRequest(`/api/friends/${codeSchema.parse(code)}/record`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  );
 }

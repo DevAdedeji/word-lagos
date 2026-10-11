@@ -6,6 +6,7 @@ import {
   Check,
   CircleHelp,
   Leaf,
+  Layers,
   Plus,
   RotateCcw,
   Shuffle,
@@ -29,15 +30,17 @@ import {
   premiumAt,
   tileValue,
   type Game,
-  type Placement,
 } from '@word-lagos/game-core';
 import { loadGame, saveGame } from './storage';
 import WordFeedback from './WordFeedback';
 import ActionIcon from './ActionIcon';
 import { useFriendGame } from './multiplayer/useFriendGame';
 import FriendLobby from './multiplayer/FriendLobby';
+import MyGames from './multiplayer/MyGames';
+import InviteCode from './multiplayer/InviteCode';
+import { useGameDraft } from './multiplayer/useGameDraft';
 import type { BotMove } from '../../../packages/game-core/src/bot';
-type Modal = 'help' | 'new' | 'dictionary' | 'exchange' | 'history' | 'friends' | null;
+type Modal = 'help' | 'new' | 'dictionary' | 'exchange' | 'history' | 'friends' | 'games' | null;
 const alphabet = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const freshGame = (): Game => createGame('computer', crypto.getRandomValues(new Uint32Array(1))[0]);
 const premiumNames = {
@@ -67,8 +70,19 @@ export default function App() {
   const playerName = multiplayer ? (friend.snapshot?.players[0]?.name ?? 'You') : 'You';
   const waiting = multiplayer && friend.snapshot?.phase === 'waiting';
 
-  const [draft, setDraft] = useState<Placement[]>([]),
-    [selected, setSelected] = useState<string | null>(null);
+  const {
+    draft,
+    setDraft,
+    saveFailed: draftSaveFailed,
+  } = useGameDraft(
+    friend.code ?? 'computer',
+    multiplayer
+      ? friend.snapshot
+        ? String(friend.snapshot.revision)
+        : null
+      : `${soloGame.rng}:${soloGame.history.length}:${soloGame.status}`,
+  );
+  const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<Modal>(null);
   const [wordsText, setWordsText] = useState(''),
     [loadError, setLoadError] = useState(false),
@@ -250,7 +264,6 @@ export default function App() {
     };
   }, [modal, blank]);
   useEffect(() => {
-    setDraft([]);
     setSelected(null);
     setBlank(null);
     setMessage('');
@@ -340,12 +353,18 @@ export default function App() {
     <div ref={appRef} className="app-shell min-h-screen bg-paper text-forest">
       <header className="mobile-game-header">
         <div className="mobile-topbar">
-          <button aria-label="How to play" onClick={() => setModal('help')}>
-            <CircleHelp size={21} />
+          <button
+            aria-label="My games"
+            title="My games"
+            disabled={friend.pending}
+            onClick={() => setModal('games')}
+          >
+            <Layers size={21} />
           </button>
           <span className="mobile-game-title">WORDPADI</span>
           <button
             aria-label="New game"
+            disabled={friend.pending}
             onClick={() => {
               setModal('new');
             }}
@@ -418,6 +437,13 @@ export default function App() {
         <span className="header-note">
           <span /> A little wordplay. Better with friends.
         </span>
+        <button
+          className="quiet-button"
+          disabled={friend.pending}
+          onClick={() => setModal('games')}
+        >
+          <Layers size={18} /> My games
+        </button>
         <button className="quiet-button help-button" onClick={() => setModal('help')}>
           <CircleHelp size={17} />
           <span>How to play</span>
@@ -436,6 +462,7 @@ export default function App() {
           </div>
           <button
             className="new-game-button"
+            disabled={friend.pending}
             onClick={() => {
               setModal('new');
             }}
@@ -475,36 +502,34 @@ export default function App() {
               </button>
             </div>
             {multiplayer && (
-              <div className="friend-connection" role="status">
-                <div>
-                  <strong>{waiting ? 'Invite your friend' : `Game ${friend.code}`}</strong>
-                  <span>
-                    {waiting
-                      ? 'Share this code to start playing'
-                      : friend.status === 'connected'
-                        ? friend.snapshot?.players[1]?.online
-                          ? 'Your friend is connected'
-                          : 'Your friend is offline · Moves are saved'
-                        : 'Reconnecting to your saved game'}
-                  </span>
-                </div>
-                {waiting && <b className="invite-code">{friend.code}</b>}
-                {friend.error && <p className="friend-error">{friend.error}</p>}
-                {friend.status === 'disconnected' && (
-                  <button className="new-game-button" onClick={friend.reconnect}>
-                    Reconnect
-                  </button>
+              <>
+                {waiting && friend.code ? (
+                  <InviteCode key={friend.code} code={friend.code} />
+                ) : (
+                  <div className="friend-connection" role="status">
+                    <div>
+                      <strong>Game {friend.code}</strong>
+                      <span>
+                        {friend.status === 'connected'
+                          ? friend.snapshot?.players[1]?.online
+                            ? 'Your friend is connected'
+                            : 'Your friend is offline · Moves are saved'
+                          : 'Reconnecting to your saved game'}
+                      </span>
+                    </div>
+                    {friend.status === 'disconnected' && (
+                      <button className="new-game-button" onClick={friend.reconnect}>
+                        Reconnect
+                      </button>
+                    )}
+                  </div>
                 )}
-                <button
-                  className="quiet-button"
-                  onClick={() => {
-                    friend.leave();
-                    clearDraft();
-                  }}
-                >
-                  Back to Ayo
-                </button>
-              </div>
+                {friend.error && (
+                  <p className="friend-error" role="alert">
+                    {friend.error}
+                  </p>
+                )}
+              </>
             )}
             <div ref={boardScrollRef} className={`board-scroll ${zoom ? 'is-zoomed' : ''}`}>
               <div className="board-frame">
@@ -764,7 +789,7 @@ export default function App() {
                   <>
                     <Check size={13} /> Accepted moves saved on the server
                   </>
-                ) : saveError ? (
+                ) : saveError || draftSaveFailed ? (
                   <>
                     <WifiOff size={13} /> Saving unavailable in this browser
                   </>
@@ -891,7 +916,7 @@ export default function App() {
       </main>
       {(modal || blank) && (
         <div
-          className="modal-overlay fixed inset-0 z-50 flex items-center justify-center"
+          className={`modal-overlay fixed inset-0 z-50 flex justify-center ${modal === 'games' ? 'games-overlay items-end min-[761px]:items-center' : 'items-center'}`}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setModal(null);
@@ -929,11 +954,24 @@ export default function App() {
                   ))}
                 </div>
               </>
+            ) : modal === 'games' ? (
+              <MyGames
+                computer={soloGame}
+                currentCode={friend.code}
+                onComputer={() => {
+                  friend.leave();
+                  setModal(null);
+                }}
+                onJoin={(code) => {
+                  if (code !== friend.code) friend.join(code);
+                  setModal(null);
+                }}
+                onNew={() => setModal('new')}
+              />
             ) : modal === 'friends' ? (
               <FriendLobby
                 onJoin={(code) => {
                   friend.join(code);
-                  clearDraft();
                   setModal(null);
                 }}
               />
@@ -952,6 +990,9 @@ export default function App() {
                 </button>
                 <button className="new-game-button modal-primary" onClick={start}>
                   Play against Ayo <ArrowRight size={18} />
+                </button>
+                <button className="quiet-button modal-help" onClick={() => setModal('help')}>
+                  <CircleHelp size={17} /> How to play
                 </button>
               </>
             ) : modal === 'history' ? (

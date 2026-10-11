@@ -55,6 +55,7 @@ export function useFriendGame() {
         active = room;
         roomRef.current = room;
         room.onMessage('snapshot', (input: unknown) => {
+          if (cancelled || active !== room) return;
           const parsed = snapshotSchema.safeParse(input);
           if (!parsed.success) {
             setError('Received an incompatible game update. Reconnect to retry.');
@@ -70,6 +71,7 @@ export function useFriendGame() {
           retries = 0;
         });
         room.onMessage('reply', (input: unknown) => {
+          if (cancelled || active !== room) return;
           const reply = replySchema.safeParse(input);
           const request = pendingRef.current;
           if (!reply.success || !request || request.id !== reply.data.id) return;
@@ -79,10 +81,12 @@ export function useFriendGame() {
           if (reply.data.ok) request.resolve();
           else request.reject(new Error(reply.data.error ?? 'Move rejected.'));
         });
-        room.onMessage('problem', (message: unknown) =>
-          setError(typeof message === 'string' ? message : 'Connection interrupted.'),
-        );
+        room.onMessage('problem', (message: unknown) => {
+          if (!cancelled && active === room)
+            setError(typeof message === 'string' ? message : 'Connection interrupted.');
+        });
         room.onError(() => {
+          if (cancelled || active !== room) return;
           setError('Connection interrupted. Reconnect to your saved game.');
         });
         room.onLeave((closeCode) => {

@@ -1429,7 +1429,7 @@
       max-width: 235px;
       line-height: 1.8;
     }
-    .new-game-button {
+    .page-heading .new-game-button {
       @apply absolute;
       right: 0;
       top: 4px;
@@ -1439,7 +1439,7 @@
       @apply bg-transparent;
       border: 0;
     }
-    .new-game-button svg {
+    .page-heading .new-game-button svg {
       width: 12px;
     }
     .eyebrow {
@@ -2668,5 +2668,180 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+@layer components {
+  .my-games p {
+    @apply text-sm leading-relaxed;
+    color: #6c7d65;
+  }
+  .my-games h3 {
+    @apply mt-6 mb-3 text-sm font-bold;
+  }
+  .games-tabs {
+    @apply my-5 rounded-xl p-1;
+    background: #e8eddd;
+  }
+  .games-tabs button {
+    @apply flex-1 rounded-lg py-3 text-sm font-bold;
+    color: #61735b;
+  }
+  .games-tabs button[aria-pressed='true'] {
+    background: #25573c;
+    color: white;
+    box-shadow: 0 2px 5px #183b2420;
+  }
+  .game-list {
+    @apply m-0 grid gap-3 p-0;
+    list-style: none;
+  }
+  .game-list-card {
+    @apply rounded-2xl;
+    border: 1px solid #dce4d2;
+    background: #f1f5e8;
+    overflow: hidden;
+  }
+  .game-resume {
+    @apply flex w-full items-center gap-3 p-4 text-left;
+    background: transparent;
+  }
+  .game-resume > span:nth-child(2) {
+    @apply min-w-0 flex-1;
+  }
+  .game-list-card strong {
+    @apply block truncate text-base;
+  }
+  .game-list-card small {
+    @apply mt-1 block text-xs;
+    color: #71816b;
+  }
+  .game-avatar {
+    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-xl;
+    background: #dce8c9;
+    color: #35633c;
+  }
+  .game-turn {
+    @apply mt-2 block text-xs font-semibold;
+    color: #71816b;
+  }
+  .game-turn.your-turn {
+    color: #287b38;
+  }
+  .game-record-link {
+    @apply flex w-full items-center justify-center gap-2 py-2 text-xs font-semibold;
+    border-top: 1px solid #dce4d2;
+    color: #527343;
+  }
+  .game-resume:hover,
+  .game-record-link:hover {
+    background: #e6eed8;
+  }
+  .record-counts {
+    @apply my-6;
+  }
+  .record-counts > div {
+    @apply rounded-xl py-4 text-center;
+    background: #e9efdc;
+  }
+  .record-counts strong {
+    @apply block text-3xl;
+    color: #245d39;
+  }
+  .record-counts span {
+    @apply mt-1 block text-xs;
+    color: #71816b;
+  }
+  .my-games ol .game-list-card {
+    @apply flex items-center justify-between gap-3 p-4;
+  }
+  .my-games ol .game-list-card b {
+    @apply shrink-0 text-lg;
+  }
+  .my-games ol .game-list-card b span {
+    color: #9baa90;
+  }
+  .my-games .games-note {
+    @apply mt-4 text-xs leading-relaxed;
+    color: #7a8970;
+  }
+  @media (max-width: 760px) {
+    .games-overlay {
+      padding: 0;
+    }
+    .games-overlay .modal {
+      max-height: 88dvh;
+      border-radius: 24px 24px 0 0;
+      padding: 26px 20px max(20px, env(safe-area-inset-bottom));
+    }
+    .games-overlay .modal::before {
+      content: '';
+      display: block;
+      width: 36px;
+      height: 4px;
+      border-radius: 4px;
+      background: #cbd6c0;
+      margin: -14px auto 18px;
+    }
+  }
+}
+
+@layer components {
+  .games-overlay .modal {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .games-overlay .modal::before {
+    flex-shrink: 0;
+  }
+  .my-games {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .games-heading {
+    flex-shrink: 0;
+  }
+  .games-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    min-height: 0;
+  }
+  .modal-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .modal-help {
+    margin: 20px auto 0;
+  }
+  .invite-banner {
+    width: 100%;
+    cursor: pointer;
+    text-align: left;
+    border: 0;
+    color: inherit;
+  }
+  .invite-banner .invite-banner-label {
+    margin-top: 0;
+  }
+  .invite-banner .invite-code {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .invite-banner:hover {
+    background: #e6efcf;
+  }
+}
+
+@layer components {
+  .games-footer {
+    flex-shrink: 0;
+    padding-top: 14px;
+  }
+  .games-footer .modal-primary {
+    margin-top: 0;
   }
 }

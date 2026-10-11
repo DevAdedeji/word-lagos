@@ -252,3 +252,65 @@ it('plays through two real WebSocket clients, broadcasts turns, and resumes the 
   await resumed.leave();
   await b.leave();
 }, 15000);
+
+describe('active games and head-to-head records', () => {
+  it('lists only the authenticated player’s active games, without private game state', async () => {
+    const issued = await auth.issueLocal();
+    const identity = await auth.verify(issued.token);
+    const game = await matches.create(identity);
+    const expired = await matches.create(identity);
+    await store.save({ ...expired, expiresAt: Date.now() - 1, revision: 1 }, 0);
+    const otherEnvironment = new Matches(store, dictionary, 'test');
+    await otherEnvironment.create(identity);
+    const result = await fetch(`http://127.0.0.1:${server.port}/api/friends`, {
+      headers: { Authorization: `Bearer ${issued.token}` },
+    });
+    const body = await result.json();
+    expect(result.status).toBe(200);
+    expect(body.games.map((g: { code: string }) => g.code)).toEqual([game.code]);
+    expect(body.games[0]).toMatchObject({ phase: 'waiting', opponent: null, scores: [0, 0] });
+    expect(Object.keys(body.games[0]).sort()).toEqual([
+      'code',
+      'opponent',
+      'phase',
+      'scores',
+      'updatedAt',
+      'yourTurn',
+    ]);
+    expect((await fetch(`http://127.0.0.1:${server.port}/api/friends`)).status).toBe(401);
+  });
+  it('counts completed results from either seat, keeps expired results, and rejects outsiders', async () => {
+    const a = { id: 'record-a', name: 'Ada' },
+      b = { id: 'record-b', name: 'Bayo' };
+    const live = await matches.join((await matches.create(a)).code, b);
+    for (const [host, guest, scores] of [
+      [a, b, [120, 90]],
+      [b, a, [130, 100]],
+      [a, b, [80, 80]],
+    ] as const) {
+      const g = await matches.join((await matches.create(host)).code, guest);
+      await store.save(
+        {
+          ...g,
+          revision: g.revision + 1,
+          expiresAt: Date.now() - 1,
+          game: { ...g.game, status: 'finished', endReason: 'scoreless', scores: [...scores] },
+        },
+        g.revision,
+      );
+    }
+    const record = await matches.record(live.code, a.id);
+    expect(record).toMatchObject({ opponent: 'Bayo', played: 3, wins: 1, losses: 1, draws: 1 });
+    expect(record.recent).toHaveLength(3);
+    expect((await matches.list(a.id, false, 0)).games.map((g) => g.code)).toEqual([live.code]);
+    expect((await matches.list(a.id, true, 0)).games).toHaveLength(3);
+    expect((await matches.record(live.code, b.id)).recent.map((g) => g.scores)).toEqual(
+      record.recent.map((g) => [g.scores[1], g.scores[0]]),
+    );
+    await expect(matches.record(live.code, playerC.id)).rejects.toThrow('not available');
+    await expect(new Matches(store, dictionary, 'live').record(live.code, a.id)).rejects.toThrow(
+      'not available',
+    );
+    expect((await matches.record(record.recent[0].code, a.id)).played).toBe(3);
+  });
+});

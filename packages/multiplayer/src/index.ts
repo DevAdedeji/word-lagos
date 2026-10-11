@@ -64,3 +64,26 @@ export const replySchema = z.object({
   error: z.string().optional(),
 });
 export const runtimeSchema = z.object({ authMode: z.enum(['local', 'vatar', 'disabled']) });
+
+export const gameSummarySchema = z.object({
+  code: codeSchema,
+  opponent: z.string().nullable(),
+  scores: z.tuple([z.number().int(), z.number().int()]),
+  phase: z.enum(['waiting', 'playing', 'finished']),
+  yourTurn: z.boolean(),
+  updatedAt: z.string(),
+});
+export type GameSummary = z.infer<typeof gameSummarySchema>;
+export const gameListSchema = z.object({
+  games: z.array(gameSummarySchema).max(50),
+  nextOffset: z.number().int().nonnegative().nullable(),
+});
+export const recordSchema = z.object({
+  opponent: z.string(),
+  played: z.number().int().nonnegative(),
+  wins: z.number().int().nonnegative(),
+  losses: z.number().int().nonnegative(),
+  draws: z.number().int().nonnegative(),
+  recent: z.array(gameSummarySchema).max(20),
+});
+export type PlayerRecord = z.infer<typeof recordSchema>;
