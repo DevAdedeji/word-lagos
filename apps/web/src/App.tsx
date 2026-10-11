@@ -343,7 +343,7 @@ export default function App() {
           <button aria-label="How to play" onClick={() => setModal('help')}>
             <CircleHelp size={21} />
           </button>
-          <span className="mobile-game-title">WORD LAGOS</span>
+          <span className="mobile-game-title">WORDPADI</span>
           <button
             aria-label="New game"
             onClick={() => {
@@ -365,7 +365,7 @@ export default function App() {
             </span>
           </div>
           <span className="versus-tile">
-            W<span>L</span>
+            W<span>P</span>
           </span>
           <div className={`mobile-player opponent ${opponentTurn ? 'current-player' : ''}`}>
             <span>
@@ -405,18 +405,18 @@ export default function App() {
         </div>
       </header>
       <header className="site-header">
-        <a className="brand" href="/" aria-label="Word Lagos home">
+        <a className="brand" href="/" aria-label="WordPadi home">
           <span className="brand-mark">
-            w<span>l</span>
+            w<span>p</span>
             <i />
           </span>
           <span>
-            word<span className="brand-light">lagos</span>
+            word<span className="brand-light">padi</span>
             <span className="brand-dot">.</span>
           </span>
         </a>
         <span className="header-note">
-          <span /> A little wordplay. A little Lagos.
+          <span /> A little wordplay. Better with friends.
         </span>
         <button className="quiet-button help-button" onClick={() => setModal('help')}>
           <CircleHelp size={17} />
@@ -812,12 +812,14 @@ export default function App() {
                     : 'Place your first word across the centre star. It’s a double word score.'}
                 </span>
                 <div className="tip-illustration" aria-hidden="true">
-                  <span>Ẹ</span>
                   <span>
-                    K<sub>5</sub>
+                    P<sub>3</sub>
                   </span>
                   <span>
-                    O<sub>1</sub>
+                    A<sub>1</sub>
+                  </span>
+                  <span>
+                    L<sub>1</sub>
                   </span>
                   <i>✳</i>
                 </div>
@@ -1055,7 +1057,7 @@ export default function App() {
                   id="word-lookup"
                   autoFocus
                   className="word-input"
-                  placeholder="Try LAGOS… or HELLO"
+                  placeholder="Try FRIEND… or HELLO"
                   maxLength={15}
                   value={lookup}
                   onChange={(e) => setLookup(e.target.value.replace(/[^a-z]/gi, '').toUpperCase())}

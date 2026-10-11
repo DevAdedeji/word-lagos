@@ -1,4 +1,4 @@
-# Word Lagos
+# WordPadi
 
 A mobile-first word board game for LagosLife: play against Ayo or invite a friend.
 
