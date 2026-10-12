@@ -16,9 +16,11 @@ export function useExpired(expiresAt?: number) {
 export default function MatchClock({
   expiresAt,
   waiting = false,
+  compact = false,
 }: {
   expiresAt: number;
   waiting?: boolean;
+  compact?: boolean;
 }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -26,19 +28,24 @@ export default function MatchClock({
     return () => clearInterval(timer);
   }, []);
   const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
-  const time =
-    seconds >= 86400
-      ? `${Math.ceil(seconds / 86400)}d`
-      : seconds >= 3600
-        ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
-        : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+  const remainder = String(seconds % 60).padStart(2, '0');
+  const time = hours ? `${hours}:${minutes}:${remainder}` : `${minutes}:${remainder}`;
   return (
     <span
       className={`match-clock ${seconds <= 300 ? 'urgent' : ''}`}
       title={new Date(expiresAt).toLocaleString()}
+      aria-label={
+        seconds ? `${waiting ? 'Invite expires in' : 'Match ends in'} ${time}` : 'Match expired'
+      }
     >
       <Clock3 size={13} />
-      {seconds ? `${waiting ? 'Invite expires in' : 'Match ends in'} ${time}` : 'Match expired'}
+      {seconds
+        ? compact
+          ? time
+          : `${waiting ? 'Invite expires in' : 'Match ends in'} ${time}`
+        : 'Match expired'}
     </span>
   );
 }

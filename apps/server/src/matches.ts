@@ -244,6 +244,26 @@ export class Matches {
     }
     throw new MatchError('The game changed. Please join again.');
   }
+  async prepareAutomaticPlay(
+    code: string,
+    playerId: string,
+    revision: number,
+    placements: import('@word-lagos/game-core').Placement[],
+  ): Promise<Match> {
+    const match = await this.get(code);
+    if (
+      match.players.length !== 2 ||
+      match.players[match.game.turn]?.id !== playerId ||
+      match.game.status !== 'playing'
+    )
+      throw new MatchError('Play a word is available on your turn.');
+    if (match.revision !== revision)
+      throw new MatchError('The board changed. No diamonds were spent.');
+    if (match.game.history.length >= 999)
+      throw new MatchError('This match has reached its turn limit.');
+    const game = playMove(match.game, placements, this.dictionary);
+    return { ...match, game: { ...game, mode: 'friends' }, revision: match.revision + 1 };
+  }
   async act(code: string, playerId: string, input: unknown): Promise<Match> {
     const parsed = commandSchema.safeParse(input);
     if (!parsed.success) throw new MatchError('Invalid move request.');

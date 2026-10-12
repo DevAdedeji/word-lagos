@@ -70,6 +70,7 @@ export const replySchema = z.object({
 export const runtimeSchema = z.object({
   authMode: z.enum(['local', 'vatar', 'disabled']),
   platformMatches: z.boolean().default(false),
+  diamondPurchases: z.boolean().default(false),
   themeProducts: z
     .array(z.object({ id: z.string(), name: z.string(), price: z.number().int() }))
     .default([]),
@@ -166,3 +167,43 @@ export const statsSchema = z.object({
   yourTurn: z.number().int(),
 });
 export type PlayerStats = z.infer<typeof statsSchema>;
+
+export const HINT_COST = 10;
+export const WELCOME_DIAMONDS = 10;
+export const diamondPacks = [
+  { id: 'diamonds_100', diamonds: 100, price: 500 },
+  { id: 'diamonds_250', diamonds: 250, price: 1000 },
+  { id: 'diamonds_700', diamonds: 700, price: 2500 },
+] as const;
+export const walletSchema = z.object({ balance: z.number().int(), demo: z.boolean() });
+export const hintMoveSchema = z.object({
+  placements: z.array(placementSchema).min(1).max(7),
+  score: z.number().int().nonnegative(),
+  words: z
+    .array(z.string().regex(/^[A-Z]{2,15}$/))
+    .min(1)
+    .max(8),
+});
+export type HintMove = z.infer<typeof hintMoveSchema>;
+export const hintRequestSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('friend'),
+      code: codeSchema,
+      revision: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('computer'),
+      board: boardSchema,
+      rack: z.array(tileSchema).min(1).max(7),
+    })
+    .strict(),
+]);
+export type HintRequest = z.infer<typeof hintRequestSchema>;
+export const hintReplySchema = z.object({
+  move: hintMoveSchema.nullable(),
+  balance: z.number().int(),
+  charged: z.boolean(),
+});

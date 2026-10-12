@@ -1,5 +1,12 @@
+import DiamondIcon from './diamonds/DiamondIcon';
+import { useDiamonds } from './diamonds/useDiamonds';
+import DiamondShop from './diamonds/DiamondShop';
+import HintPanel from './diamonds/HintPanel';
+import { HINT_COST } from '@word-lagos/multiplayer';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Lightbulb,
+  Menu,
   ArrowRight,
   ArrowUpRight,
   BookOpen,
@@ -57,6 +64,9 @@ import InviteCode from './multiplayer/InviteCode';
 import { useGameDraft } from './multiplayer/useGameDraft';
 import type { BotMove } from '../../../packages/game-core/src/bot';
 type Modal =
+  | 'menu'
+  | 'diamonds'
+  | 'hint'
   | 'help'
   | 'new'
   | 'dictionary'
@@ -83,6 +93,8 @@ export default function App() {
   const [soloGame, setGame] = useState<Game>(() => loadGame() ?? freshGame());
   const friend = useFriendGame();
   const platform = usePlatform();
+  const diamonds = useDiamonds(!!platform.identity || platform.demo, platform.demo);
+  const [hintSearched, setHintSearched] = useState(false);
   const account = usePlayerStats(friend.snapshot?.revision);
   const expired = useExpired(
     friend.snapshot?.status === 'playing' ? friend.snapshot.expiresAt : undefined,
@@ -184,7 +196,7 @@ export default function App() {
   const dictionary = useMemo(() => makeLexicon(wordsText), [wordsText]);
   const opponentTurn = game.turn === 1 && game.status === 'playing';
   const isThinking = !multiplayer && opponentTurn && !platform.paused && !platform.previewTheme;
-  const canPlay =
+  const turnReady =
     !platform.paused &&
     !platform.previewTheme &&
     !expired &&
@@ -194,7 +206,43 @@ export default function App() {
     game.status === 'playing' &&
     (!multiplayer ||
       (friend.status === 'connected' && !friend.pending && friend.snapshot?.phase === 'playing'));
+  const canPlay = turnReady && !diamonds.busy;
   const rack = multiplayer ? (friend.snapshot?.rack ?? []) : soloGame.racks[0];
+  const hintPosition = multiplayer
+    ? `${friend.code}:${friend.snapshot?.revision}`
+    : JSON.stringify({ board: game.board, rack });
+  const currentHintPosition = useRef(hintPosition);
+  currentHintPosition.current = hintPosition;
+  useEffect(() => {
+    setHintSearched(false);
+  }, [hintPosition]);
+  async function requestHint() {
+    if (!canPlay) return;
+    const position = hintPosition;
+    const result = await diamonds.hint(
+      multiplayer && friend.snapshot
+        ? { kind: 'friend', code: friend.snapshot.code, revision: friend.snapshot.revision }
+        : { kind: 'computer', board: game.board, rack },
+    );
+    if (
+      result &&
+      (position === currentHintPosition.current ||
+        (multiplayer && currentHintPosition.current.startsWith(`${friend.code}:`)))
+    ) {
+      setHintSearched(true);
+      if (result.move) {
+        if (!multiplayer) {
+          const next = playMove(soloGame, result.move.placements, dictionary);
+          setSaveError(!saveGame(next));
+          setGame(next);
+        }
+        clearDraft();
+        setModal(null);
+      }
+    }
+    if (multiplayer && friend.code)
+      window.dispatchEvent(new CustomEvent('wordpadi:platform-update', { detail: friend.code }));
+  }
   const orderedRack = [...rack].sort((a, b) => rackOrder.indexOf(a.id) - rackOrder.indexOf(b.id));
   const preview = useMemo(
     () => evaluateMove(game.board, rack, draft, dictionary),
@@ -203,6 +251,16 @@ export default function App() {
   const lastMove = game.history.at(-1);
   const lastCells = new Set(lastMove?.placements.map((p) => `${p.row},${p.col}`));
   const opponentPlayed = lastMove?.player === 1 && lastMove.kind === 'play';
+  const opponentFeedback = useMemo(() => {
+    if (!opponentPlayed || !lastMove.placements.length) return [];
+    const previous = game.board.map((row) => row.slice());
+    const playedRack = lastMove.placements.map((p) => {
+      const tile = previous[p.row][p.col]!;
+      previous[p.row][p.col] = null;
+      return { id: p.tileId, letter: tile.blank ? '?' : p.letter };
+    });
+    return evaluateMove(previous, playedRack, lastMove.placements, dictionary).words ?? [];
+  }, [game.board, lastMove, opponentPlayed, dictionary]);
   function locateOpponentMove() {
     if (!opponentPlayed) return;
     const tile = boardScrollRef.current?.querySelector<HTMLElement>('.opponent-last-play');
@@ -500,7 +558,7 @@ export default function App() {
             aria-label="My games"
             title={turnCount ? `${turnCount} games need your turn` : 'My games'}
             className="games-nav-button"
-            disabled={friend.pending}
+            disabled={friend.pending || diamonds.busy}
             onClick={() => setModal('games')}
           >
             <Layers size={21} />
@@ -512,8 +570,16 @@ export default function App() {
           </button>
           <span className="mobile-game-title">WORDPADI</span>
           <button
+            className="diamond-nav"
+            aria-label="Open diamond shop"
+            onClick={() => setModal('diamonds')}
+          >
+            <DiamondIcon size={15} />
+            <span>{diamonds.balance === null ? '—' : Math.max(0, diamonds.balance)}</span>
+          </button>
+          <button
             aria-label="New game"
-            disabled={friend.pending}
+            disabled={friend.pending || diamonds.busy}
             onClick={() => {
               setModal('new');
             }}
@@ -561,12 +627,20 @@ export default function App() {
             <span className="brand-dot">.</span>
           </span>
         </a>
+        <button
+          className="quiet-button diamond-desktop"
+          onClick={() => setModal('diamonds')}
+          aria-label="Open diamond shop"
+        >
+          <DiamondIcon size={18} />
+          {diamonds.balance === null ? 'Diamonds' : Math.max(0, diamonds.balance)}
+        </button>
         <span className="header-note">
           <span /> A little wordplay. Better with friends.
         </span>
         <button
           className="quiet-button"
-          disabled={friend.pending}
+          disabled={friend.pending || diamonds.busy}
           onClick={() => setModal('games')}
         >
           <Layers size={18} /> My games{' '}
@@ -590,7 +664,7 @@ export default function App() {
           </div>
           <button
             className="new-game-button"
-            disabled={friend.pending}
+            disabled={friend.pending || diamonds.busy}
             onClick={() => {
               setModal('new');
             }}
@@ -601,14 +675,6 @@ export default function App() {
         <div className="game-layout">
           <section className="play-area" aria-label="Game board and rack">
             <div className="board-toolbar">
-              <div className="mode-label">
-                <span className="live-dot" />
-                You vs. {opponentName}
-                <span className="mode-separator">/</span>
-                <span className="casual-label">
-                  {multiplayer ? `Code: ${friend.code}` : 'Friendly computer'}
-                </span>
-              </div>
               <button
                 className="icon-button zoom-button"
                 onClick={toggleZoom}
@@ -617,34 +683,12 @@ export default function App() {
                 {zoom ? <ZoomOut size={18} /> : <ZoomIn size={18} />}
                 <span>{zoom ? 'Full board' : 'Zoom in'}</span>
               </button>
-              <button
-                className="word-check history-toggle"
-                onClick={() => setModal('history')}
-                aria-label="View game history"
-              >
-                <Trophy size={15} />
-              </button>
-              <button className="word-check" onClick={() => setModal('dictionary')}>
-                <BookOpen size={15} />
-                <span>Word check</span>
-              </button>
-            </div>
-            {multiplayer && friend.snapshot && !finished && (
-              <div className="match-controls">
-                <MatchClock expiresAt={friend.snapshot.expiresAt} waiting={waiting} />
-                {!waiting && !expired && (
-                  <button
-                    disabled={friend.pending || friend.status !== 'connected'}
-                    onClick={() => {
-                      setActionError('');
-                      setModal('resign');
-                    }}
-                  >
-                    <Flag size={13} /> Resign
-                  </button>
+              <div className="board-timer">
+                {multiplayer && friend.snapshot && !finished && (
+                  <MatchClock expiresAt={friend.snapshot.expiresAt} waiting={waiting} compact />
                 )}
               </div>
-            )}
+            </div>
             <div className="board-status-slot">
               {platform.previewTheme ? (
                 <div className="theme-preview-notice">
@@ -715,20 +759,7 @@ export default function App() {
                     <span>Moves are saved · They can continue when they return</span>
                   </div>
                 </div>
-              ) : opponentPlayed ? (
-                <button
-                  className="opponent-move-notice"
-                  onClick={locateOpponentMove}
-                  aria-label={`Find ${opponentName}’s last move: ${lastMove.words.join(', ')}, ${lastMove.score} points`}
-                >
-                  <span className="opponent-move-dot" />
-                  <span>
-                    <strong>{opponentName}</strong> played {lastMove.words.join(' + ')}
-                  </span>
-                  <b>+{lastMove.score}</b>
-                  <Eye size={15} />
-                </button>
-              ) : opponentTurn && !platform.paused && !friend.pending && opponentRackCount > 0 ? (
+              ) : !platform.paused && opponentRackCount > 0 ? (
                 <div className="opponent-rack-bar">
                   <OpponentRack count={opponentRackCount} name={opponentName} />
                 </div>
@@ -781,7 +812,15 @@ export default function App() {
                       );
                     }),
                   )}
-                  {preview.words && <WordFeedback words={preview.words} />}
+                  {draft.length ? (
+                    preview.words && <WordFeedback words={preview.words} />
+                  ) : opponentPlayed ? (
+                    <WordFeedback
+                      words={opponentFeedback}
+                      opponent={opponentName}
+                      total={lastMove.score}
+                    />
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -831,6 +870,17 @@ export default function App() {
                     {personalTilesLeft === null ? 'in shared bag' : 'tiles left for you'}
                   </span>
                 </span>
+                <button
+                  className="hint-button"
+                  disabled={!canPlay || diamonds.busy}
+                  onClick={() => setModal('hint')}
+                  aria-label={`Play the best word for ${HINT_COST} diamonds`}
+                >
+                  <Lightbulb size={15} />
+                  <span>Play word</span>
+                  <b>{HINT_COST}</b>
+                  <DiamondIcon size={12} />
+                </button>
                 <button
                   className="shuffle-button"
                   onClick={shuffle}
@@ -922,6 +972,9 @@ export default function App() {
                 )}
               </div>
               <div className="rack-actions">
+                <ActionIcon label="Game menu" onClick={() => setModal('menu')}>
+                  <Menu size={24} />
+                </ActionIcon>
                 <ActionIcon
                   label="Recall tiles"
                   onClick={clearDraft}
@@ -929,6 +982,11 @@ export default function App() {
                 >
                   <RotateCcw size={24} />
                 </ActionIcon>
+                <button className="play-button" onClick={submit} disabled={!canPlay || !preview.ok}>
+                  {friend.pending ? 'Submitting…' : 'Submit'}{' '}
+                  {preview.ok && <span>+{preview.score}</span>}
+                  <ArrowRight size={17} />
+                </button>
                 <ActionIcon
                   label="Swap tiles"
                   onClick={() => {
@@ -946,11 +1004,6 @@ export default function App() {
                 >
                   <SkipForward size={24} />
                 </ActionIcon>
-                <button className="play-button" onClick={submit} disabled={!canPlay || !preview.ok}>
-                  {friend.pending ? 'Submitting…' : 'Submit'}{' '}
-                  {preview.ok && <span>+{preview.score}</span>}
-                  <ArrowRight size={17} />
-                </button>
               </div>
             </div>
           </section>
@@ -1154,7 +1207,7 @@ export default function App() {
       </main>
       {(modal || blank) && (
         <div
-          className={`modal-overlay fixed inset-0 z-50 flex justify-center ${['games', 'stats', 'themes', 'result'].includes(modal ?? '') ? 'games-overlay items-end min-[761px]:items-center' : 'items-center'}`}
+          className={`modal-overlay fixed inset-0 z-50 flex justify-center ${['menu', 'games', 'stats', 'themes', 'result', 'diamonds', 'hint'].includes(modal ?? '') ? 'games-overlay items-end min-[761px]:items-center' : 'items-center'}`}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setModal(null);
@@ -1192,6 +1245,50 @@ export default function App() {
                   ))}
                 </div>
               </>
+            ) : modal === 'menu' ? (
+              <div className="game-menu">
+                <h2 id="dialog-title">Game menu</h2>
+                <nav aria-label="Game options">
+                  <button onClick={() => setModal('history')}>
+                    <Trophy size={21} />
+                    <span>Word trail</span>
+                    <ArrowRight size={17} />
+                  </button>
+                  <button onClick={() => setModal('dictionary')}>
+                    <BookOpen size={21} />
+                    <span>Word check</span>
+                    <ArrowRight size={17} />
+                  </button>
+                  {!finished && !waiting && !expired && (
+                    <button
+                      className="game-menu-resign"
+                      disabled={
+                        actionBusy ||
+                        diamonds.busy ||
+                        (multiplayer && friend.status !== 'connected')
+                      }
+                      onClick={() => {
+                        setActionError('');
+                        setModal('resign');
+                      }}
+                    >
+                      <Flag size={21} />
+                      <span>Resign game</span>
+                      <ArrowRight size={17} />
+                    </button>
+                  )}
+                </nav>
+              </div>
+            ) : modal === 'diamonds' ? (
+              <DiamondShop wallet={diamonds} />
+            ) : modal === 'hint' ? (
+              <HintPanel
+                wallet={diamonds}
+                searched={hintSearched}
+                onFind={() => void requestHint()}
+                onShop={() => setModal('diamonds')}
+                canFind={turnReady}
+              />
             ) : modal === 'games' ? (
               <MyGames
                 computer={soloGame}

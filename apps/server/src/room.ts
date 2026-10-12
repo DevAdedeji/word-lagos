@@ -106,7 +106,7 @@ export function friendRoom(auth: Auth, matches: Matches) {
           client.send('problem', 'Connection interrupted. Reconnect to your saved game.'),
         );
     }
-    private async publish() {
+    async publish() {
       const match = await matches.get(this.code);
       const online = new Set([...this.identities.values()].map((p) => p.id));
       for (const client of this.clients) {

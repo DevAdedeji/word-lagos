@@ -1,3 +1,5 @@
+import { Hints } from './hints';
+import { DiamondError } from './diamonds-store';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { Server, matchMaker } from '@colyseus/core';
@@ -5,7 +7,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
-import { codeSchema } from '@word-lagos/multiplayer';
+import { diamondPacks, codeSchema, hintRequestSchema } from '@word-lagos/multiplayer';
 import { Auth, AuthError } from './auth';
 import { Matches, MatchError } from './matches';
 import type { Store } from './store';
@@ -32,6 +34,8 @@ export async function startServer({
   platformMatches?: boolean;
 }) {
   const app = express();
+  const diamondEnvironment = purchases?.mode ?? 'local';
+  const hints = new Hints(store, matches, diamondEnvironment);
   app.disable('x-powered-by');
   // Railway supplies one trusted reverse proxy hop. Never trust arbitrary client IP headers locally.
   if (production) app.set('trust proxy', 1);
@@ -55,6 +59,7 @@ export async function startServer({
     res.json({
       authMode: auth.mode,
       platformMatches,
+      diamondPurchases: !!purchases,
       themeProduct: purchases ? themeProduct : null,
       themeProducts: purchases ? themeProducts : [],
     }),
@@ -93,6 +98,64 @@ export async function startServer({
       next(error);
     }
   });
+  app.post('/api/diamonds/wallet', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await auth.verify(bearer(req));
+      if (auth.mode !== 'local' && !purchases)
+        throw new DiamondError('Diamonds are not available yet.');
+      const balance = await store.diamonds.initialize(identity.id, diamondEnvironment);
+      res.json({ balance, demo: auth.mode === 'local' });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/diamonds/demo', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (auth.mode !== 'local' || production)
+        throw new DiamondError('Demo purchases are unavailable.');
+      const identity = await auth.verify(bearer(req));
+      const { id, productId } = z
+        .object({ id: z.uuid(), productId: z.string() })
+        .strict()
+        .parse(req.body);
+      const pack = diamondPacks.find((p) => p.id === productId);
+      if (!pack) throw new DiamondError('Unknown diamond pack.');
+      res.json({
+        balance: await store.diamonds.demoCredit(identity.id, id, pack.diamonds),
+        demo: true,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post(
+    '/api/diamonds/hint',
+    rateLimit({ windowMs: 60000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false }),
+    async (req, res, next) => {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const identity = await auth.verify(bearer(req));
+        if (auth.mode !== 'local' && !purchases)
+          throw new DiamondError('Hints are not available yet.');
+        const input = hintRequestSchema.parse(req.body);
+        const result = await hints.request(identity.id, input);
+        if (input.kind === 'friend' && result.move) {
+          try {
+            await matchMaker.remoteRoomCall(input.code, 'publish');
+          } catch {
+            console.warn(
+              JSON.stringify({ event: 'automatic_move_publish_pending', code: input.code }),
+            );
+          }
+        }
+        res.json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
   app.post('/api/platform/matches', async (req, res, next) => {
     try {
       const identity = await auth.verify(bearer(req));
@@ -214,6 +277,7 @@ export async function startServer({
         error instanceof AuthError ||
         error instanceof MatchError ||
         error instanceof VatarError ||
+        error instanceof DiamondError ||
         error instanceof z.ZodError;
       if (!known) console.error(JSON.stringify({ event: 'request_failed' }));
       res.status(error instanceof AuthError ? 401 : known ? 400 : 500).json({

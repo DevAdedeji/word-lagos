@@ -123,3 +123,22 @@ variables are required. Startup migration 2 adds a unique rematch index; it has 
 exercised in local tests, not applied to production. Existing Sunset purchases remain valid.
 
 The personal-supply marker is stored with each game. Existing records need no conversion. Deploy client and server together for the new snapshot count. Older server code cannot safely resume personal-supply games; do not roll back to a version that strips the marker.
+
+## Diamonds (local preview)
+
+Play word costs 10 diamonds and automatically submits the highest-scoring legal move
+found using the game dictionary, including premiums, crosswords and the seven-tile bonus.
+It replaces unsubmitted tiles and ends the player's turn. No valid move or a failed search
+costs nothing. Each account receives 10 welcome diamonds once per environment.
+
+Repeatable packs are `diamonds_100` (100 for ₦500), `diamonds_250` (250 for ₦1,000),
+and `diamonds_700` (700 for ₦2,500). Create and approve these consumable products in
+LagosLife before enabling real purchases. Local preview packs are simulated. Actual
+provider checkout for these packs has not yet been tested. No new environment variables
+are needed beyond the existing purchase integration. Stakes remain disabled.
+
+Startup migration 3 adds wallets and an idempotent ledger, separated by account and
+local/test/live environment. Friend-game submission and diamond spending commit together.
+Recover previous play retries a paid position without another charge; computer games
+remain device-local. Verified refunds reverse the original credit once, including a debt
+if the diamonds have already been spent. Future credits settle that balance.

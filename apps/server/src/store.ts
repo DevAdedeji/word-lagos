@@ -1,3 +1,4 @@
+import { diamondStore, migrateDiamonds } from './diamonds-store';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle as liteDrizzle } from 'drizzle-orm/pglite';
 import { drizzle as pgDrizzle } from 'drizzle-orm/node-postgres';
@@ -129,6 +130,8 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
       sql`CREATE UNIQUE INDEX friend_matches_rematch ON friend_matches ((coalesce(data->>'environment','local')), (data->>'rematchOf')) WHERE data->>'rematchOf' IS NOT NULL`,
     );
   });
+  await migrateDiamonds(db);
+  const diamonds = diamondStore(db);
   const owned = (playerId: string, environment: string) =>
     and(
       sql`${matches.data}->'players' @> ${JSON.stringify([{ id: playerId }])}::jsonb`,
@@ -146,6 +149,7 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
     updatedAt: matches.updatedAt,
   };
   return {
+    diamonds,
     async grantPurchase(purchase: Purchase): Promise<void> {
       await db
         .insert(purchases)
@@ -172,11 +176,8 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
           ),
         );
     },
-    async revokePurchase(id: string, environment: string): Promise<void> {
-      await db
-        .update(purchases)
-        .set({ status: 'refunded', updatedAt: sql`now()` })
-        .where(and(eq(purchases.id, id), eq(purchases.environment, environment)));
+    async revokePurchase(id: string, environment: 'test' | 'live'): Promise<void> {
+      await diamonds.refund(id, environment);
     },
     async ownsTheme(
       playerId: string,
@@ -206,6 +207,7 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
             eq(purchases.playerId, playerId),
             eq(purchases.environment, environment),
             sql`${purchases.status} <> 'refunded'`,
+            sql`${purchases.productId} IN ('sunset_board','midnight_board','ankara_board','royal_board')`,
           ),
         )
         .limit(20);

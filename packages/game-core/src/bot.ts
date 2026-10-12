@@ -23,6 +23,7 @@ export function findBotMove(
   rack: Tile[],
   dictionary: ReadonlySet<string>,
   trie = buildTrie(dictionary),
+  strategy: 'friendly' | 'best' = 'friendly',
 ): BotMove | null {
   const opening = !board.some((row) => row.some(Boolean));
   const candidates: BotMove[] = [];
@@ -145,5 +146,7 @@ export function findBotMove(
   if (!candidates.length) return null;
   candidates.sort((a, b) => a.score - b.score);
   // A friendly opponent chooses a solid move, rather than the highest scoring one.
-  return candidates[Math.floor((candidates.length - 1) * 0.65)];
+  return strategy === 'best'
+    ? candidates[candidates.length - 1]
+    : candidates[Math.floor((candidates.length - 1) * 0.65)];
 }

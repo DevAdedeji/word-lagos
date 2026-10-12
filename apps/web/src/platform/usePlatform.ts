@@ -40,6 +40,7 @@ export function usePlatform() {
         }),
       );
       if (active) setOwnedThemes(result.themes);
+      window.dispatchEvent(new Event('wordpadi:purchase-update'));
     }
     void (async () => {
       const config = runtimeSchema.parse(await jsonRequest('/api/config'));
