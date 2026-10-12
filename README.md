@@ -131,7 +131,10 @@ The personal-supply marker is stored with each game. Existing records need no co
 Play word costs 10 diamonds and automatically submits the highest-scoring legal move
 found using the game dictionary, including premiums, crosswords and the seven-tile bonus.
 It replaces unsubmitted tiles and ends the player's turn. No valid move or a failed search
-costs nothing. Each account receives 10 welcome diamonds once per environment.
+costs nothing. Each account receives 20 welcome diamonds once per environment (two automatic plays).
+Accounts that received the original 10 receive a one-time extra 10 when their wallet
+next initializes. This is an additive ledger credit; purchases, spending and refund
+adjustments are preserved.
 
 Repeatable packs are `diamonds_100` (100 for ₦500), `diamonds_250` (250 for ₦1,000),
 and `diamonds_700` (700 for ₦2,500). Create and approve these consumable products in

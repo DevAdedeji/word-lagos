@@ -169,7 +169,7 @@ export const statsSchema = z.object({
 export type PlayerStats = z.infer<typeof statsSchema>;
 
 export const HINT_COST = 10;
-export const WELCOME_DIAMONDS = 10;
+export const WELCOME_DIAMONDS = 20;
 export const diamondPacks = [
   { id: 'diamonds_100', diamonds: 100, price: 500 },
   { id: 'diamonds_250', diamonds: 250, price: 1000 },

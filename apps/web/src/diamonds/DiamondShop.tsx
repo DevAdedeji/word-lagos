@@ -1,6 +1,6 @@
 import DiamondIcon from './DiamondIcon';
 import { Sparkles, RotateCcw } from 'lucide-react';
-import { diamondPacks, HINT_COST } from '@word-lagos/multiplayer';
+import { diamondPacks, HINT_COST, WELCOME_DIAMONDS } from '@word-lagos/multiplayer';
 import type { Diamonds } from './useDiamonds';
 export default function DiamondShop({ wallet }: { wallet: Diamonds }) {
   return (
@@ -53,8 +53,8 @@ export default function DiamondShop({ wallet }: { wallet: Diamonds }) {
         ))}
       </div>
       <p className="diamond-note">
-        10 welcome diamonds, once per account. Your balance works across games. No diamonds are
-        spent if no playable word is found.
+        {WELCOME_DIAMONDS} welcome diamonds, once per account. Your balance works across games. No
+        diamonds are spent if no playable word is found.
       </p>
       {wallet.error && (
         <p className="diamond-error" role="alert">

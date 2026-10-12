@@ -25,7 +25,21 @@ async function lockWallet(tx: Transaction, player: string, env: Environment) {
   const result = await tx.execute(
     sql`SELECT balance FROM diamond_wallets WHERE environment=${env} AND player_id=${player} FOR UPDATE`,
   );
-  return balanceRow.parse(result.rows[0]).balance;
+  const balance = balanceRow.parse(result.rows[0]).balance;
+  // Upgrade the original welcome gift without rewriting history or resetting spent balances.
+  // The wallet lock and unique entry key keep concurrent requests from crediting twice.
+  const topUp = await tx.execute(
+    sql`INSERT INTO diamond_entries(environment, player_id, entry_key, delta, kind)
+        SELECT environment, player_id, 'welcome-upgrade-20', 10, 'welcome'
+        FROM diamond_entries
+        WHERE environment=${env} AND player_id=${player} AND entry_key='welcome' AND delta=10
+        ON CONFLICT DO NOTHING RETURNING delta`,
+  );
+  if (!topUp.rows.length) return balance;
+  await tx.execute(
+    sql`UPDATE diamond_wallets SET balance=balance+10 WHERE environment=${env} AND player_id=${player}`,
+  );
+  return balance + 10;
 }
 export async function migrateDiamonds(db: Database) {
   await db.transaction(async (tx) => {
