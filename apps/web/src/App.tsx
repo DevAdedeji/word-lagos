@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -9,6 +9,9 @@ import {
   Layers,
   Plus,
   Palette,
+  Flag,
+  BarChart3,
+  Eye,
   RotateCcw,
   Shuffle,
   SkipForward,
@@ -22,6 +25,10 @@ import {
 } from 'lucide-react';
 import {
   createGame,
+  availableBag,
+  tilesRemaining,
+  resignGame,
+  winnerOf,
   emptyBoard,
   evaluateMove,
   exchangeTiles,
@@ -34,10 +41,16 @@ import {
 } from '@word-lagos/game-core';
 import { loadGame, saveGame } from './storage';
 import WordFeedback from './WordFeedback';
+import OpponentRack from './OpponentRack';
+import { useTileDrag } from './useTileDrag';
 import ActionIcon from './ActionIcon';
 import { useFriendGame } from './multiplayer/useFriendGame';
 import FriendLobby from './multiplayer/FriendLobby';
 import MyGames from './multiplayer/MyGames';
+import PlayerStats from './multiplayer/PlayerStats';
+import { usePlayerStats } from './multiplayer/usePlayerStats';
+import MatchClock, { useExpired } from './multiplayer/MatchClock';
+import { createFriendGame } from './multiplayer/client';
 import { usePlatform } from './platform/usePlatform';
 import BoardThemes from './platform/BoardThemes';
 import InviteCode from './multiplayer/InviteCode';
@@ -52,6 +65,10 @@ type Modal =
   | 'friends'
   | 'games'
   | 'themes'
+  | 'stats'
+  | 'resign'
+  | 'result'
+  | 'rematch'
   | null;
 const alphabet = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const freshGame = (): Game => createGame('computer', crypto.getRandomValues(new Uint32Array(1))[0]);
@@ -66,6 +83,17 @@ export default function App() {
   const [soloGame, setGame] = useState<Game>(() => loadGame() ?? freshGame());
   const friend = useFriendGame();
   const platform = usePlatform();
+  const account = usePlayerStats(friend.snapshot?.revision);
+  const expired = useExpired(
+    friend.snapshot?.status === 'playing' ? friend.snapshot.expiresAt : undefined,
+  );
+  const turnCount =
+    (account.stats?.yourTurn ?? 0) + (soloGame.status === 'playing' && soloGame.turn === 0 ? 1 : 0);
+  const [rematchTarget, setRematchTarget] = useState<{ code: string; opponent: string } | null>(
+    null,
+  );
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
   const multiplayer = !!friend.code;
   const game = multiplayer
     ? (friend.snapshot ?? {
@@ -78,7 +106,15 @@ export default function App() {
         endReason: null,
       })
     : soloGame;
-  const bagCount = multiplayer ? (friend.snapshot?.bagCount ?? 0) : soloGame.bag.length;
+  const bagCount = multiplayer
+    ? (friend.snapshot?.bagCount ?? 0)
+    : availableBag(soloGame, 0).length;
+  const personalTilesLeft = multiplayer
+    ? (friend.snapshot?.tilesLeft ?? null)
+    : tilesRemaining(soloGame, 0);
+  const opponentRackCount = multiplayer
+    ? (friend.snapshot?.opponentRackCount ?? 0)
+    : soloGame.racks[1].length;
   const opponentName = multiplayer ? (friend.snapshot?.players[1]?.name ?? 'Friend') : 'Ayo';
   const playerName = multiplayer ? (friend.snapshot?.players[0]?.name ?? 'You') : 'You';
   const waiting = multiplayer && friend.snapshot?.phase === 'waiting';
@@ -147,9 +183,11 @@ export default function App() {
 
   const dictionary = useMemo(() => makeLexicon(wordsText), [wordsText]);
   const opponentTurn = game.turn === 1 && game.status === 'playing';
-  const isThinking = !multiplayer && opponentTurn && !platform.paused;
+  const isThinking = !multiplayer && opponentTurn && !platform.paused && !platform.previewTheme;
   const canPlay =
     !platform.paused &&
+    !platform.previewTheme &&
+    !expired &&
     !!wordsText &&
     !loadError &&
     !opponentTurn &&
@@ -164,6 +202,38 @@ export default function App() {
   );
   const lastMove = game.history.at(-1);
   const lastCells = new Set(lastMove?.placements.map((p) => `${p.row},${p.col}`));
+  const opponentPlayed = lastMove?.player === 1 && lastMove.kind === 'play';
+  function locateOpponentMove() {
+    if (!opponentPlayed) return;
+    const tile = boardScrollRef.current?.querySelector<HTMLElement>('.opponent-last-play');
+    tile?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+  }
+  const tileDrag = useTileDrag(
+    canPlay && !modal && !blank,
+    `${friend.code ?? 'computer'}:${game.history.length}`,
+    (id, target) => {
+      if (target.kind === 'rack') {
+        setDraft((current) => current.filter((p) => p.tileId !== id));
+        setSelected(null);
+        setMessage('Tile returned to your rack.');
+        return;
+      }
+      if (game.board[target.row][target.col]) return;
+      const pending = draft.find((p) => p.tileId === id);
+      const occupied = draft.find((p) => p.row === target.row && p.col === target.col);
+      if (occupied && occupied.tileId !== id) return;
+      if (pending) {
+        setDraft((current) =>
+          current.map((p) => (p.tileId === id ? { ...p, row: target.row, col: target.col } : p)),
+        );
+        setSelected(null);
+        setMessage('');
+      } else place(target.row, target.col, id);
+    },
+  );
+  const draggedTile = tileDrag.drag && rack.find((t) => t.id === tileDrag.drag?.id);
+  const draggedLetter =
+    draggedTile && (draft.find((p) => p.tileId === draggedTile.id)?.letter ?? draggedTile.letter);
   const bestWord = game.history
     .filter((h) => h.player === 0 && h.kind === 'play')
     .sort((a, b) => b.score - a.score)[0];
@@ -213,7 +283,7 @@ export default function App() {
           next = playMove(soloGame, event.data.move.placements, dictionary);
           const move = next.history.at(-1)!;
           setMessage(`Ayo played ${move.words.join(' + ')} for ${move.score} points.`);
-        } else if (bagCount >= 7) {
+        } else if (availableBag(soloGame, 1).length >= 7) {
           next = exchangeTiles(
             soloGame,
             soloGame.racks[1].map((t) => t.id),
@@ -344,6 +414,45 @@ export default function App() {
     zoomFocus.current = { x: 0.5, y: 0.5 };
     setZoom(false);
   }
+  function requestRematch(code: string, opponent: string) {
+    setRematchTarget({ code, opponent });
+    setActionError('');
+    setModal('rematch');
+  }
+  async function rematch() {
+    if (!rematchTarget || actionBusy) return;
+    setActionBusy(true);
+    setActionError('');
+    try {
+      const code = await createFriendGame(rematchTarget.code);
+      friend.join(code);
+      clearDraft();
+      setModal(null);
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Could not start a rematch. Try again.',
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  }
+  async function resign() {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setActionError('');
+    try {
+      if (multiplayer) await friend.send({ kind: 'resign' });
+      else setGame(resignGame(soloGame, 0));
+      clearDraft();
+      setModal('result');
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Could not resign. Reconnect and try again.',
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  }
   function shuffle() {
     const ids = rack.map((t) => t.id);
     for (let i = ids.length - 1; i > 0; i--) {
@@ -352,31 +461,54 @@ export default function App() {
     }
     setRackOrder(ids);
   }
-  function drop(event: DragEvent, row: number, col: number) {
-    event.preventDefault();
-    place(row, col, event.dataTransfer.getData('text/plain'));
-  }
   const finished = game.status === 'finished';
+  const showActivePlayer =
+    !finished && !expired && !waiting && (!multiplayer || friend.status === 'connected');
+  useEffect(() => {
+    if (finished && (!multiplayer || friend.snapshot)) setModal('result');
+  }, [finished, friend.code]);
+  useEffect(() => {
+    if (!zoom || !opponentPlayed || modal) return;
+    const frame = requestAnimationFrame(locateOpponentMove);
+    return () => cancelAnimationFrame(frame);
+  }, [zoom, game.history.length, friend.code, modal]);
   const outcome =
-    game.scores[0] === game.scores[1]
+    winnerOf(game) === null
       ? 'A well-matched draw.'
-      : game.scores[0] > game.scores[1]
+      : winnerOf(game) === 0
         ? 'You’ve got a way with words.'
         : `${opponentName} takes this one.`;
   return (
     <div
       ref={appRef}
-      className={`app-shell min-h-screen bg-paper text-forest ${platform.theme === 'sunset' ? 'theme-sunset' : ''}`}
+      onClickCapture={tileDrag.clickCapture}
+      className={`app-shell min-h-screen bg-paper text-forest theme-${platform.previewTheme ?? platform.theme}`}
     >
+      {tileDrag.drag && draggedTile && (
+        <div
+          className="dragging-tile"
+          aria-hidden="true"
+          style={{ left: tileDrag.drag.x, top: tileDrag.drag.y - 48 }}
+        >
+          <span>{draggedLetter === '?' ? '' : draggedLetter}</span>
+          <sub>{tileValue(draggedTile.letter)}</sub>
+        </div>
+      )}
       <header className="mobile-game-header">
         <div className="mobile-topbar">
           <button
             aria-label="My games"
-            title="My games"
+            title={turnCount ? `${turnCount} games need your turn` : 'My games'}
+            className="games-nav-button"
             disabled={friend.pending}
             onClick={() => setModal('games')}
           >
             <Layers size={21} />
+            {turnCount > 0 && (
+              <span className="turn-badge" aria-label={`${turnCount} games need your turn`}>
+                {turnCount}
+              </span>
+            )}
           </button>
           <span className="mobile-game-title">WORDPADI</span>
           <button
@@ -390,7 +522,9 @@ export default function App() {
           </button>
         </div>
         <div className="mobile-scoreboard">
-          <div className={`mobile-player ${!opponentTurn ? 'current-player' : ''}`}>
+          <div
+            className={`mobile-player ${showActivePlayer && !opponentTurn ? 'current-player' : ''}`}
+          >
             <span className="mobile-avatar">Y</span>
             <span>
               {playerName}
@@ -403,7 +537,9 @@ export default function App() {
           <span className="versus-tile">
             W<span>P</span>
           </span>
-          <div className={`mobile-player opponent ${opponentTurn ? 'current-player' : ''}`}>
+          <div
+            className={`mobile-player opponent ${showActivePlayer && opponentTurn ? 'current-player' : ''}`}
+          >
             <span>
               {opponentName}
               <strong>{game.scores[1]}</strong>
@@ -412,32 +548,6 @@ export default function App() {
               <Sparkles size={22} />
             </span>
           </div>
-        </div>
-        <div
-          className={`mobile-play-status ${draft.length && !preview.ok ? 'invalid-play-status' : ''}`}
-          role="status"
-        >
-          {multiplayer && friend.status !== 'connected'
-            ? friend.status === 'connecting'
-              ? 'Connecting…'
-              : 'Connection lost · Reconnect below'
-            : waiting
-              ? 'Waiting for your friend to join'
-              : friend.pending
-                ? 'Submitting…'
-                : finished
-                  ? outcome
-                  : !wordsText
-                    ? 'Loading dictionary…'
-                    : isThinking
-                      ? 'Ayo is thinking…'
-                      : multiplayer && opponentTurn
-                        ? `${opponentName}’s turn`
-                        : draft.length
-                          ? preview.ok
-                            ? `${preview.words.map((w) => w.word).join(' + ')} · ${preview.score} points`
-                            : preview.error
-                          : message || 'Your turn · Make your next word count'}
         </div>
       </header>
       <header className="site-header">
@@ -459,7 +569,8 @@ export default function App() {
           disabled={friend.pending}
           onClick={() => setModal('games')}
         >
-          <Layers size={18} /> My games
+          <Layers size={18} /> My games{' '}
+          {turnCount > 0 && <span className="tab-count">{turnCount}</span>}
         </button>
         <button className="quiet-button help-button" onClick={() => setModal('help')}>
           <CircleHelp size={17} />
@@ -518,36 +629,111 @@ export default function App() {
                 <span>Word check</span>
               </button>
             </div>
-            {multiplayer && (
-              <>
-                {waiting && friend.code ? (
-                  <InviteCode key={friend.code} code={friend.code} />
-                ) : (
-                  <div className="friend-connection" role="status">
-                    <div>
-                      <strong>Game {friend.code}</strong>
-                      <span>
-                        {friend.status === 'connected'
-                          ? friend.snapshot?.players[1]?.online
-                            ? 'Your friend is connected'
-                            : 'Your friend is offline · Moves are saved'
-                          : 'Reconnecting to your saved game'}
-                      </span>
-                    </div>
-                    {friend.status === 'disconnected' && (
-                      <button className="new-game-button" onClick={friend.reconnect}>
-                        Reconnect
-                      </button>
-                    )}
-                  </div>
+            {multiplayer && friend.snapshot && !finished && (
+              <div className="match-controls">
+                <MatchClock expiresAt={friend.snapshot.expiresAt} waiting={waiting} />
+                {!waiting && !expired && (
+                  <button
+                    disabled={friend.pending || friend.status !== 'connected'}
+                    onClick={() => {
+                      setActionError('');
+                      setModal('resign');
+                    }}
+                  >
+                    <Flag size={13} /> Resign
+                  </button>
                 )}
-                {friend.error && (
-                  <p className="friend-error" role="alert">
-                    {friend.error}
-                  </p>
-                )}
-              </>
+              </div>
             )}
+            <div className="board-status-slot">
+              {platform.previewTheme ? (
+                <div className="theme-preview-notice">
+                  <span>
+                    <Eye size={15} /> Trying {platform.previewTheme}
+                  </span>
+                  <button onClick={() => setModal('themes')}>Back to shop</button>
+                  <button aria-label="End theme preview" onClick={() => platform.preview(null)}>
+                    <X size={15} />
+                  </button>
+                </div>
+              ) : finished ? (
+                <div className="match-result-banner">
+                  <Trophy size={23} />
+                  <div>
+                    <strong>{outcome}</strong>
+                    <span>
+                      {game.endReason === 'resigned'
+                        ? game.resignedBy === 0
+                          ? 'You resigned.'
+                          : 'Your opponent resigned.'
+                        : `${game.scores[0]} – ${game.scores[1]} · Final score`}
+                    </span>
+                  </div>
+                  <button
+                    disabled={actionBusy}
+                    onClick={() =>
+                      multiplayer && friend.code
+                        ? requestRematch(friend.code, opponentName)
+                        : start()
+                    }
+                  >
+                    Rematch <RotateCcw size={15} />
+                  </button>
+                </div>
+              ) : expired ? (
+                <div className="match-expired">
+                  <strong>This match has expired.</strong>
+                  <span>Start a fresh game to play again.</span>
+                  <button onClick={() => setModal('new')}>
+                    New game <Plus size={15} />
+                  </button>
+                </div>
+              ) : multiplayer && friend.status !== 'connected' ? (
+                <div className="friend-connection" role="status">
+                  <div>
+                    <strong>
+                      {friend.status === 'connecting' ? 'Connecting…' : 'Connection lost'}
+                    </strong>
+                    <span>{friend.error || 'Reconnecting to your saved game'}</span>
+                  </div>
+                  {friend.status === 'disconnected' && (
+                    <button className="new-game-button" onClick={friend.reconnect}>
+                      Reconnect
+                    </button>
+                  )}
+                </div>
+              ) : multiplayer && friend.error ? (
+                <p className="friend-error" role="alert">
+                  {friend.error}
+                </p>
+              ) : waiting && friend.code ? (
+                <InviteCode key={friend.code} code={friend.code} />
+              ) : multiplayer && !friend.snapshot?.players[1]?.online ? (
+                <div className="friend-connection" role="status">
+                  <div>
+                    <strong>Your friend is offline</strong>
+                    <span>Moves are saved · They can continue when they return</span>
+                  </div>
+                </div>
+              ) : opponentPlayed ? (
+                <button
+                  className="opponent-move-notice"
+                  onClick={locateOpponentMove}
+                  aria-label={`Find ${opponentName}’s last move: ${lastMove.words.join(', ')}, ${lastMove.score} points`}
+                >
+                  <span className="opponent-move-dot" />
+                  <span>
+                    <strong>{opponentName}</strong> played {lastMove.words.join(' + ')}
+                  </span>
+                  <b>+{lastMove.score}</b>
+                  <Eye size={15} />
+                </button>
+              ) : opponentTurn && !platform.paused && !friend.pending && opponentRackCount > 0 ? (
+                <div className="opponent-rack-bar">
+                  <OpponentRack count={opponentRackCount} name={opponentName} />
+                </div>
+              ) : null}
+            </div>
             <div ref={boardScrollRef} className={`board-scroll ${zoom ? 'is-zoomed' : ''}`}>
               <div className="board-frame">
                 <div className="board" role="group" aria-label="15 by 15 word board">
@@ -562,12 +748,17 @@ export default function App() {
                       return (
                         <button
                           key={`${r}-${c}`}
-                          className={`square premium-${premium || 'normal'} ${letter ? 'has-tile' : ''} ${pending ? `pending ${preview.ok ? 'pending-valid' : 'pending-invalid'}` : ''} ${tile && lastCells.has(`${r},${c}`) ? 'last-play' : ''} ${r === 7 && c === 7 ? 'centre' : ''}`}
+                          className={`square premium-${premium || 'normal'} ${letter ? 'has-tile' : ''} ${pending ? `pending ${preview.ok ? 'pending-valid' : 'pending-invalid'}` : ''} ${tile && lastCells.has(`${r},${c}`) ? `last-play ${opponentPlayed ? 'opponent-last-play' : ''}` : ''} ${tileDrag.drag?.target?.kind === 'board' && tileDrag.drag.target.row === r && tileDrag.drag.target.col === c && !tile ? 'drop-target' : ''} ${pending?.tileId === tileDrag.drag?.id && pending ? 'drag-source' : ''} ${r === 7 && c === 7 ? 'centre' : ''}`}
                           onClick={() => place(r, c)}
-                          onDragOver={(e) => {
-                            if (canPlay) e.preventDefault();
+                          data-board-row={r}
+                          data-board-col={c}
+                          onPointerDown={(e) => {
+                            if (pending) tileDrag.down(e, pending.tileId);
                           }}
-                          onDrop={(e) => drop(e, r, c)}
+                          onPointerMove={tileDrag.move}
+                          onPointerUp={tileDrag.up}
+                          onPointerCancel={tileDrag.cancel}
+                          onLostPointerCapture={tileDrag.cancel}
                           disabled={!canPlay || !!tile}
                           aria-label={`${String.fromCharCode(65 + c)}${r + 1}: ${letter ? `${letter}${isBlank ? ' blank' : ''}${pending ? ', placed tile, tap to recall' : ''}` : r === 7 && c === 7 ? 'Centre star, double word' : premiumNames[premium]}`}
                         >
@@ -612,7 +803,11 @@ export default function App() {
                 Double letter
               </span>
             </div>
-            <div ref={rackRef} className="rack-panel">
+            <div
+              ref={rackRef}
+              data-tile-rack
+              className={`rack-panel ${tileDrag.drag?.target?.kind === 'rack' ? 'rack-drop-target' : ''}`}
+            >
               <div className="rack-topline">
                 <span>
                   <span className="rack-score">
@@ -622,7 +817,19 @@ export default function App() {
                   <span className="rack-opponent">
                     {opponentName} <strong>{game.scores[1]}</strong>
                   </span>
-                  <span className="rack-count">{rack.length - draft.length} tiles</span>
+                  <span className="rack-count">{rack.length - draft.length} in rack</span>
+                  <span
+                    className="bag-count"
+                    aria-label={
+                      personalTilesLeft === null
+                        ? `${bagCount} tiles in the shared bag`
+                        : `${personalTilesLeft} of your 60 tiles left to play, including your rack`
+                    }
+                  >
+                    <Layers size={13} />
+                    <strong>{personalTilesLeft ?? bagCount}</strong>{' '}
+                    {personalTilesLeft === null ? 'in shared bag' : 'tiles left for you'}
+                  </span>
                 </span>
                 <button
                   className="shuffle-button"
@@ -640,7 +847,7 @@ export default function App() {
                   return (
                     <button
                       key={t.id}
-                      className={`rack-tile ${used ? 'used' : ''} ${selected === t.id ? 'selected' : ''}`}
+                      className={`rack-tile ${used ? 'used' : ''} ${selected === t.id ? 'selected' : ''} ${tileDrag.drag?.id === t.id ? 'drag-source' : ''}`}
                       disabled={used || !canPlay}
                       aria-label={`${t.letter === '?' ? 'Blank' : t.letter} tile, ${tileValue(t.letter)} points`}
                       aria-pressed={selected === t.id}
@@ -648,11 +855,11 @@ export default function App() {
                         setSelected(selected === t.id ? null : t.id);
                         setMessage('');
                       }}
-                      draggable={canPlay && !used}
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', t.id);
-                        setSelected(t.id);
-                      }}
+                      onPointerDown={(e) => tileDrag.down(e, t.id)}
+                      onPointerMove={tileDrag.move}
+                      onPointerUp={tileDrag.up}
+                      onPointerCancel={tileDrag.cancel}
+                      onLostPointerCapture={tileDrag.cancel}
                     >
                       {!used && (
                         <>
@@ -751,9 +958,13 @@ export default function App() {
             <section className="match-card">
               <div className="card-topline">
                 <h2>Your table</h2>
-                <span className="pill">{finished ? 'FINISHED' : 'SOLO SESSION'}</span>
+                <span className="pill">
+                  {finished ? 'FINISHED' : multiplayer ? 'FRIEND MATCH' : 'VS AYO'}
+                </span>
               </div>
-              <div className={`player-row ${!opponentTurn && !finished ? 'active-player' : ''}`}>
+              <div
+                className={`player-row ${showActivePlayer && !opponentTurn ? 'active-player' : ''}`}
+              >
                 <div className="avatar you-avatar">Y</div>
                 <div className="player-info">
                   <h3>
@@ -771,7 +982,9 @@ export default function App() {
                 </div>
                 <strong className="player-score">{game.scores[0]}</strong>
               </div>
-              <div className={`player-row ${opponentTurn ? 'active-player' : ''}`}>
+              <div
+                className={`player-row ${showActivePlayer && opponentTurn ? 'active-player' : ''}`}
+              >
                 <div className="avatar ayo-avatar">
                   <Sparkles size={21} />
                 </div>
@@ -794,7 +1007,11 @@ export default function App() {
               <div className="match-stats">
                 <div>
                   <span>{bagCount}</span>
-                  <p>Tiles in the bag</p>
+                  <p>
+                    {personalTilesLeft === null
+                      ? 'Tiles in the shared bag'
+                      : 'Tiles in your reserve'}
+                  </p>
                 </div>
                 <div>
                   <span>{game.history.length + (finished ? 0 : 1)}</span>
@@ -822,10 +1039,12 @@ export default function App() {
                 <Trophy size={27} />
                 <h2>{outcome}</h2>
                 <p>
-                  {game.endReason === 'rack-empty'
-                    ? 'The last tile is down.'
-                    : 'Six turns without a score.'}{' '}
-                  Unplayed tile values have been deducted
+                  {game.endReason === 'resigned'
+                    ? 'The game ended by resignation.'
+                    : game.endReason === 'rack-empty'
+                      ? 'The last tile is down.'
+                      : 'Six turns without a score.'}{' '}
+                  {game.endReason !== 'resigned' && 'Unplayed tile values have been deducted'}
                   {game.endReason === 'rack-empty' ? ' and awarded to the player who finished' : ''}
                   .
                 </p>
@@ -889,7 +1108,9 @@ export default function App() {
                               ? h.words.join(' · ')
                               : h.kind === 'pass'
                                 ? 'Passed the turn'
-                                : 'Swapped tiles'}
+                                : h.kind === 'resign'
+                                  ? 'Resigned'
+                                  : 'Swapped tiles'}
                           </strong>
                           <span>
                             {h.player ? opponentName : 'You'} · Turn {game.history.length - i}
@@ -933,7 +1154,7 @@ export default function App() {
       </main>
       {(modal || blank) && (
         <div
-          className={`modal-overlay fixed inset-0 z-50 flex justify-center ${modal === 'games' ? 'games-overlay items-end min-[761px]:items-center' : 'items-center'}`}
+          className={`modal-overlay fixed inset-0 z-50 flex justify-center ${['games', 'stats', 'themes', 'result'].includes(modal ?? '') ? 'games-overlay items-end min-[761px]:items-center' : 'items-center'}`}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setModal(null);
@@ -942,7 +1163,7 @@ export default function App() {
           }}
         >
           <div
-            className="modal"
+            className={`modal ${modal === 'themes' ? 'shop-modal' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="dialog-title"
@@ -974,6 +1195,10 @@ export default function App() {
             ) : modal === 'games' ? (
               <MyGames
                 computer={soloGame}
+                turnCount={turnCount}
+                onStats={() => setModal('stats')}
+                onShop={() => setModal('themes')}
+                onRematch={requestRematch}
                 currentCode={friend.code}
                 onComputer={() => {
                   friend.leave();
@@ -986,7 +1211,131 @@ export default function App() {
                 onNew={() => setModal('new')}
               />
             ) : modal === 'themes' ? (
-              <BoardThemes platform={platform} />
+              <BoardThemes platform={platform} onPreview={() => setModal(null)} />
+            ) : modal === 'stats' ? (
+              <PlayerStats account={account} />
+            ) : modal === 'result' ? (
+              <div
+                className={`game-result result-${winnerOf(game) === null ? 'draw' : winnerOf(game) === 0 ? 'win' : 'loss'}`}
+              >
+                <div className="result-medal">
+                  <Trophy size={34} />
+                </div>
+                <div className="eyebrow">THAT’S A WRAP</div>
+                <h2 id="dialog-title">
+                  {winnerOf(game) === null
+                    ? 'A perfect match.'
+                    : winnerOf(game) === 0
+                      ? 'You won!'
+                      : `${opponentName} wins.`}
+                </h2>
+                <p>
+                  {winnerOf(game) === null
+                    ? 'All square. One more round to settle it?'
+                    : winnerOf(game) === 0
+                      ? 'Good words. Great game. Take your bow.'
+                      : 'A good game, and another chance is waiting.'}
+                </p>
+                <div className="result-scoreboard">
+                  <div className={winnerOf(game) === 0 ? 'winner' : ''}>
+                    <span>You</span>
+                    <strong>{game.scores[0]}</strong>
+                    <small>{winnerOf(game) === 0 ? 'WINNER' : 'POINTS'}</small>
+                  </div>
+                  <span>—</span>
+                  <div className={winnerOf(game) === 1 ? 'winner' : ''}>
+                    <span>{opponentName}</span>
+                    <strong>{game.scores[1]}</strong>
+                    <small>{winnerOf(game) === 1 ? 'WINNER' : 'POINTS'}</small>
+                  </div>
+                </div>
+                <p className="result-reason">
+                  {game.endReason === 'resigned'
+                    ? game.resignedBy === 0
+                      ? 'You resigned. Your opponent takes the win.'
+                      : `${opponentName} resigned. You take the win.`
+                    : game.endReason === 'rack-empty'
+                      ? 'One player has used all their tiles. Final rack adjustments are included.'
+                      : 'The game ended after six scoreless turns. Final tile adjustments are included.'}
+                </p>
+                <button
+                  className="play-button modal-primary"
+                  onClick={() =>
+                    multiplayer && friend.code ? requestRematch(friend.code, opponentName) : start()
+                  }
+                >
+                  <RotateCcw size={17} /> Play again
+                </button>
+                <button className="result-games" onClick={() => setModal('games')}>
+                  <Layers size={17} /> My games
+                </button>
+                <button className="result-history" onClick={() => setModal('history')}>
+                  View the word trail <ArrowRight size={14} />
+                </button>
+              </div>
+            ) : modal === 'resign' ? (
+              <div className="decision-panel">
+                <span className="decision-icon">
+                  <Flag size={26} />
+                </span>
+                <div className="eyebrow">LEAVE THE TABLE</div>
+                <h2 id="dialog-title">Call this one?</h2>
+                <p>
+                  Resigning ends this game and gives {opponentName} the win. Your other games stay
+                  right where you left them.
+                </p>
+                {actionError && (
+                  <p role="alert" className="friend-error">
+                    {actionError}
+                  </p>
+                )}
+                <button
+                  className="play-button modal-primary"
+                  disabled={actionBusy}
+                  onClick={() => setModal(null)}
+                >
+                  Keep playing
+                </button>
+                <button
+                  className="resign-confirm"
+                  disabled={actionBusy || expired}
+                  onClick={() => void resign()}
+                >
+                  {actionBusy ? 'Saving…' : 'Resign game'}
+                </button>
+              </div>
+            ) : modal === 'rematch' ? (
+              <div className="decision-panel">
+                <span className="decision-icon">
+                  <RotateCcw size={26} />
+                </span>
+                <div className="eyebrow">ONE MORE ROUND</div>
+                <h2 id="dialog-title">Again, {rematchTarget?.opponent}?</h2>
+                <p>
+                  A fresh board, fresh tiles. Share the new code with {rematchTarget?.opponent};
+                  their seat is reserved. Your previous result stays in Records.
+                </p>
+                {actionError && (
+                  <p role="alert" className="friend-error">
+                    {actionError}
+                  </p>
+                )}
+                <button
+                  className="play-button modal-primary"
+                  disabled={actionBusy}
+                  onClick={() => void rematch()}
+                >
+                  {actionBusy ? 'Preparing your table…' : 'Start rematch'}
+                  <ArrowRight size={17} />
+                </button>
+                <button
+                  className="quiet-button modal-help"
+                  disabled={actionBusy}
+                  onClick={() => setModal('games')}
+                >
+                  Back to My games
+                </button>
+              </div>
             ) : modal === 'friends' ? (
               <FriendLobby
                 onJoin={(code) => {
@@ -1011,7 +1360,10 @@ export default function App() {
                   Play against Ayo <ArrowRight size={18} />
                 </button>
                 <button className="quiet-button modal-help" onClick={() => setModal('themes')}>
-                  <Palette size={17} /> Board themes
+                  <Palette size={17} /> Theme shop
+                </button>
+                <button className="quiet-button modal-help" onClick={() => setModal('stats')}>
+                  <BarChart3 size={17} /> My stats & achievements
                 </button>
                 <button className="quiet-button modal-help" onClick={() => setModal('help')}>
                   <CircleHelp size={17} /> How to play
@@ -1023,9 +1375,20 @@ export default function App() {
                 <h2 id="dialog-title">{finished ? outcome : 'The word trail'}</h2>
                 <p>
                   You: {game.scores[0]}
-                  {` · ${opponentName}: ${game.scores[1]}`} · {bagCount} tiles left
+                  {` · ${opponentName}: ${game.scores[1]}`} ·{' '}
+                  {personalTilesLeft === null
+                    ? `${bagCount} in the shared bag`
+                    : `${personalTilesLeft} tiles left for you (${bagCount} in reserve)`}
                 </p>
-                {finished && <p>Remaining tile values have been deducted from the final scores.</p>}
+                {finished && (
+                  <p>
+                    {game.endReason === 'resigned'
+                      ? game.resignedBy === 0
+                        ? 'You resigned. Your opponent wins.'
+                        : 'Your opponent resigned. You win.'
+                      : 'Remaining tile values have been deducted from the final scores.'}
+                  </p>
+                )}
                 <ol className="history-list">
                   {game.history
                     .slice()
@@ -1038,7 +1401,9 @@ export default function App() {
                               ? h.words.join(' · ')
                               : h.kind === 'pass'
                                 ? 'Passed'
-                                : 'Swapped tiles'}
+                                : h.kind === 'resign'
+                                  ? 'Resigned'
+                                  : 'Swapped tiles'}
                           </strong>
                           <span>
                             {h.player ? opponentName : 'You'} · Turn {game.history.length - i}
@@ -1049,6 +1414,29 @@ export default function App() {
                     ))}
                 </ol>
                 {!game.history.length && <p>Your first word starts the story.</p>}
+                {finished && (
+                  <button
+                    className="rematch-cta"
+                    onClick={() =>
+                      multiplayer && friend.code
+                        ? requestRematch(friend.code, opponentName)
+                        : start()
+                    }
+                  >
+                    <RotateCcw size={17} /> Rematch with {opponentName}
+                  </button>
+                )}
+                {!finished && !waiting && !expired && (
+                  <button
+                    className="resign-confirm"
+                    onClick={() => {
+                      setActionError('');
+                      setModal('resign');
+                    }}
+                  >
+                    <Flag size={15} /> Resign game
+                  </button>
+                )}
                 <button
                   className="play-button modal-primary"
                   onClick={() => {
@@ -1067,7 +1455,8 @@ export default function App() {
                     <strong>Pick. Place. Play.</strong>
                     <p>
                       Tap a tile, then a square. Tap a placed tile to take it back. You can also
-                      drag tiles from your rack.
+                      drag tiles from your rack. Drag unsubmitted tiles to another square or back to
+                      your rack.
                     </p>
                   </li>
                   <li>
@@ -1087,16 +1476,18 @@ export default function App() {
                   <li>
                     <strong>Find your next move.</strong>
                     <p>
-                      Blank tiles can be any letter and score zero. Swap tiles when at least seven
-                      remain in the bag; swapping uses your turn. Pass when you need to.
+                      New games give each player 60 tiles: 2 blanks, 28 vowels and 30 consonants.
+                      Hold up to seven at a time. Blanks can be any letter and score zero. Swap when
+                      at least seven tiles remain in your reserve; swapping uses your turn.
                     </p>
                   </li>
                   <li>
                     <strong>Finish strong.</strong>
                     <p>
-                      The game ends when the bag is empty and a rack is cleared, or after six
-                      consecutive scoreless turns. Unplayed tiles are deducted; a player who empties
-                      their rack receives their opponent’s remaining tile points.
+                      The game ends when a player uses all 60 of their tiles, or after six
+                      consecutive scoreless turns. Unplayed rack tiles are deducted; a player who
+                      finishes their supply receives their opponent’s remaining rack points. Earlier
+                      games keep their shared bag rules.
                     </p>
                   </li>
                 </ol>

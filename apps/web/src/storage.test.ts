@@ -47,3 +47,11 @@ describe('saved games', () => {
     expect(saveGame(createGame('computer', 1))).toBe(false);
   });
 });
+
+it('restores both the new personal supply and legacy shared games', () => {
+  for (const supply of ['shared-100', 'personal-60'] as const) {
+    const game = createGame('computer', 31, supply);
+    expect(saveGame(game)).toBe(true);
+    expect(loadGame()).toEqual(game);
+  }
+});

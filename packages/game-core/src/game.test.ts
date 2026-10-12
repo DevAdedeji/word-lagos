@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   createGame,
+  availableBag,
+  tilesRemaining,
   emptyBoard,
   evaluateMove,
   exchangeTiles,
@@ -69,7 +71,7 @@ const move = (tiles: Tile[], word: string, row = 7, col = 7, vertical = false): 
     col: col + (vertical ? 0 : i),
   }));
 function fixture(letters = 'CATSEAR'): Game {
-  return { ...createGame('computer', 42), racks: [rack(letters), rack('DOGSANT')] };
+  return { ...createGame('computer', 42, 'shared-100'), racks: [rack(letters), rack('DOGSANT')] };
 }
 describe('word placement and scoring', () => {
   it('doubles the opening word on the centre square', () => {
@@ -196,11 +198,11 @@ describe('word placement and scoring', () => {
   });
 });
 describe('game lifecycle', () => {
-  it('creates reproducible bags and conserves all 100 tiles', () => {
+  it('creates reproducible bags and conserves all 120 tiles', () => {
     const g = createGame('computer', 123);
     expect(g).toEqual(createGame('computer', 123));
-    expect(g.bag.length).toBe(86);
-    expect(new Set([...g.bag, ...g.racks.flat()].map((t) => t.id)).size).toBe(100);
+    expect(g.bag.length).toBe(106);
+    expect(new Set([...g.bag, ...g.racks.flat()].map((t) => t.id)).size).toBe(120);
   });
   it('refills a rack and hands over the turn after a valid move', () => {
     const g = playMove(fixture(), move(rack('CAT'), 'CAT'), dict);
@@ -302,5 +304,105 @@ it('returns per-word validity and coordinates for live board outlines', () => {
         ],
       },
     ],
+  });
+});
+
+describe('personal 60-tile supplies', () => {
+  it('gives each seat exactly two blanks, 28 vowels and 30 consonants, with independent IDs', () => {
+    for (const seed of [1, 72, 555]) {
+      const game = createGame('friends', seed);
+      for (const seat of [0, 1]) {
+        const tiles = [...availableBag(game, seat), ...game.racks[seat]];
+        expect(tiles).toHaveLength(60);
+        expect(tiles.filter((t) => t.letter === '?')).toHaveLength(2);
+        expect(tiles.filter((t) => /^[AEIOU]$/.test(t.letter))).toHaveLength(28);
+        expect(tiles.filter((t) => /^[B-DF-HJ-NP-TV-Z]$/.test(t.letter))).toHaveLength(30);
+        expect(game.racks[seat]).toHaveLength(7);
+        expect(tilesRemaining(game, seat)).toBe(60);
+      }
+    }
+  });
+  it('draws only from the active player’s reserve and reduces only their remaining count', () => {
+    let game = createGame('friends', 24);
+    const all = [...game.bag, ...game.racks.flat()];
+    const pick = (letter: string) => all.find((t) => t.id.startsWith('0:') && t.letter === letter)!;
+    const chosen = [pick('A'), pick('T')];
+    const remainder = all.filter((t) => !chosen.includes(t));
+    game = {
+      ...game,
+      racks: [chosen, game.racks[1]],
+      bag: remainder.filter((t) => !game.racks[1].some((r) => r.id === t.id)),
+    };
+    const other = [...availableBag(game, 1)];
+    const next = playMove(game, move(chosen, 'AT'), dict);
+    expect(tilesRemaining(next, 0)).toBe(58);
+    expect(tilesRemaining(next, 1)).toBe(60);
+    expect(availableBag(next, 1)).toEqual(other);
+    expect(next.racks[0]).toHaveLength(7);
+    expect(next.racks[0].every((t) => t.id.startsWith('0:'))).toBe(true);
+  });
+  it('does not consume a personal supply on passes or swaps, or swap the opponent’s reserve', () => {
+    const game = createGame('friends', 99);
+    const next = exchangeTiles(
+      game,
+      game.racks[0].slice(0, 2).map((t) => t.id),
+    );
+    expect(tilesRemaining(next, 0)).toBe(60);
+    expect(availableBag(next, 1)).toEqual(availableBag(game, 1));
+    expect(tilesRemaining(passTurn(next), 1)).toBe(60);
+    const noReserve = { ...game, bag: availableBag(game, 1) };
+    expect(() => exchangeTiles(noReserve, [game.racks[0][0].id])).toThrow('seven');
+  });
+  it('ends when one player uses their entire supply even if the opponent has reserve tiles', () => {
+    const game = createGame('friends', 33);
+    const tiles = [
+      { id: '0:A0', letter: 'A' },
+      { id: '0:T0', letter: 'T' },
+    ];
+    const next = playMove(
+      { ...game, bag: availableBag(game, 1), racks: [tiles, game.racks[1]] },
+      move(tiles, 'AT'),
+      dict,
+    );
+    expect(next.status).toBe('finished');
+    expect(next.endReason).toBe('rack-empty');
+    expect(tilesRemaining(next, 0)).toBe(0);
+    expect(tilesRemaining(next, 1)).toBe(60);
+  });
+  it('preserves the shared bag rules for legacy games', () => {
+    const game = createGame('computer', 33, 'shared-100');
+    expect(game.bag).toHaveLength(86);
+    expect(tilesRemaining(game, 0)).toBeNull();
+    expect(availableBag(game, 1)).toEqual(game.bag);
+  });
+});
+describe('all four premium squares', () => {
+  it.each([
+    ['DL', 3, 7, 3],
+    ['TL', 5, 5, 4],
+    ['DW', 1, 1, 4],
+    ['TW', 0, 7, 6],
+  ] as const)('%s multiplies a newly played tile correctly', (_, row, col, score) => {
+    const board = emptyBoard();
+    board[row][col - 1] = { id: 'old', letter: 'A', blank: false };
+    const tiles = rack('T');
+    expect(evaluateMove(board, tiles, move(tiles, 'T', row, col), dict)).toMatchObject({
+      ok: true,
+      score,
+    });
+  });
+  it.each([
+    ['DL', 3, 7],
+    ['TL', 5, 5],
+    ['DW', 1, 1],
+    ['TW', 0, 7],
+  ] as const)('%s is not reused when its old tile forms a new word', (_, row, col) => {
+    const board = emptyBoard();
+    board[row][col] = { id: 'old', letter: 'A', blank: false };
+    const tiles = rack('T');
+    expect(evaluateMove(board, tiles, move(tiles, 'T', row, col + 1), dict)).toMatchObject({
+      ok: true,
+      score: 2,
+    });
   });
 });

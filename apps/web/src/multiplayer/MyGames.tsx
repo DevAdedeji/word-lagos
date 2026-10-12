@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Plus, RefreshCw, Sparkles, Trophy, Users } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trophy,
+  Users,
+  Palette,
+  BarChart3,
+  RotateCcw,
+} from 'lucide-react';
 import type { Game } from '@word-lagos/game-core';
 import type { GameSummary, PlayerRecord } from '@word-lagos/multiplayer';
+import MatchClock from './MatchClock';
 import { listFriendGames, playerRecord } from './client';
 
 export default function MyGames({
@@ -10,12 +22,20 @@ export default function MyGames({
   onComputer,
   onJoin,
   onNew,
+  onStats,
+  onShop,
+  onRematch,
+  turnCount,
 }: {
   computer: Game;
   currentCode: string | null;
   onComputer: () => void;
   onJoin: (code: string) => void;
   onNew: () => void;
+  onStats: () => void;
+  onShop: () => void;
+  onRematch: (code: string, opponent: string) => void;
+  turnCount: number;
 }) {
   const [tab, setTab] = useState<'active' | 'records'>('active');
   const [games, setGames] = useState<GameSummary[]>([]);
@@ -116,6 +136,15 @@ export default function MyGames({
                     <span>Their wins</span>
                   </div>
                 </div>
+                {record.recent[0] && (
+                  <button
+                    className="rematch-cta"
+                    onClick={() => onRematch(record.recent[0].code, record.opponent)}
+                  >
+                    <RotateCcw size={17} /> Rematch with {record.opponent}
+                    <ArrowRight size={17} />
+                  </button>
+                )}
                 <h3>Recent games</h3>
                 {!record.recent.length && (
                   <p>Your first result will appear when you finish a game together.</p>
@@ -148,6 +177,14 @@ export default function MyGames({
             <div className="eyebrow">PULL UP YOUR CHAIR</div>
             <h2 id="dialog-title">My games</h2>
             <p>Pick up where you left off.</p>
+            <div className="games-tools">
+              <button onClick={onStats}>
+                <BarChart3 size={16} /> My stats
+              </button>
+              <button onClick={onShop}>
+                <Palette size={16} /> Theme shop
+              </button>
+            </div>
             <div className="games-tabs flex gap-2" role="group" aria-label="Game lists">
               <button
                 aria-pressed={tab === 'active'}
@@ -160,7 +197,7 @@ export default function MyGames({
                   setGames([]);
                 }}
               >
-                Active games
+                Active games {turnCount > 0 && <span className="tab-count">{turnCount}</span>}
               </button>
               <button
                 aria-pressed={tab === 'records'}
@@ -226,6 +263,11 @@ export default function MyGames({
                     </span>
                     <ArrowRight size={18} />
                   </button>
+                  {g.phase !== 'finished' && (
+                    <div className="game-card-clock">
+                      <MatchClock expiresAt={g.expiresAt} waiting={g.phase === 'waiting'} />
+                    </div>
+                  )}
                   {tab === 'active' && g.opponent && (
                     <button
                       className="game-record-link"
@@ -279,11 +321,7 @@ export default function MyGames({
   );
 }
 function resultLabel(game: GameSummary) {
-  return game.scores[0] === game.scores[1]
-    ? 'Draw'
-    : game.scores[0] > game.scores[1]
-      ? 'You won'
-      : 'They won';
+  return game.outcome === 'draw' ? 'Draw' : game.outcome === 'win' ? 'You won' : 'They won';
 }
 
 function GamesSkeleton({ record = false }: { record?: boolean }) {

@@ -21,7 +21,8 @@ const schema = z
           .length(15),
       )
       .length(15),
-    bag: z.array(tile).max(100),
+    bag: z.array(tile).max(120),
+    tileSupply: z.literal('personal-60').optional(),
     racks: z.array(z.array(tile).max(7)).min(1).max(2),
     scores: z.array(z.number().int()).min(1).max(2),
     turn: z.number().int().min(0).max(1),
@@ -29,7 +30,7 @@ const schema = z
       .array(
         z.object({
           player: z.number().int().min(0).max(1),
-          kind: z.enum(['play', 'pass', 'exchange']),
+          kind: z.enum(['play', 'pass', 'exchange', 'resign']),
           words: z.array(z.string().max(15)).max(8),
           score: z.number().int().min(0),
           placements: z.array(placement).max(7),
@@ -39,14 +40,23 @@ const schema = z
     scoreless: z.number().int().min(0).max(6),
     rng: z.number().int().min(0).max(4294967295),
     status: z.enum(['playing', 'finished']),
-    endReason: z.enum(['rack-empty', 'scoreless']).nullable(),
+    endReason: z.enum(['rack-empty', 'scoreless', 'resigned']).nullable(),
+    resignedBy: z.number().int().min(0).max(1).optional(),
   })
   .refine(
     (g) => g.racks.length === 2 && g.scores.length === g.racks.length && g.turn < g.racks.length,
   )
   .refine((g) => {
     const all = [...g.bag, ...g.racks.flat(), ...g.board.flat().filter((t) => t !== null)];
-    return all.length === 100 && new Set(all.map((t) => t.id)).size === 100;
+    const count = g.tileSupply === 'personal-60' ? 120 : 100;
+    if (all.length !== count || new Set(all.map((t) => t.id)).size !== count) return false;
+    if (g.tileSupply === 'personal-60')
+      return [0, 1].every(
+        (seat) =>
+          all.filter((t) => t.id.startsWith(`${seat}:`)).length === 60 &&
+          g.racks[seat].every((t) => t.id.startsWith(`${seat}:`)),
+      );
+    return true;
   });
 const KEY = 'word-lagos:game:v1';
 export function loadGame(): Game | null {

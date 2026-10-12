@@ -1,5 +1,14 @@
 import { createHash, randomInt } from 'node:crypto';
-import { createGame, exchangeTiles, passTurn, playMove } from '@word-lagos/game-core';
+import {
+  createGame,
+  availableBag,
+  tilesRemaining,
+  exchangeTiles,
+  passTurn,
+  playMove,
+  resignGame,
+  winnerOf,
+} from '@word-lagos/game-core';
 import {
   commandSchema,
   type Command,
@@ -17,7 +26,13 @@ export class Matches {
     private environment: 'local' | 'test' | 'live' = 'local',
     private provider?: Vatar,
   ) {}
-  async importPlatform(id: string, code: string, player: Player): Promise<Match> {
+  async importPlatform(
+    id: string,
+    code: string,
+    player: Player,
+    rematchOf?: string,
+    attempt = 0,
+  ): Promise<Match> {
     if (!this.provider?.matchesEnabled)
       throw new MatchError('LagosLife matches are not configured.');
     const remote = await this.provider.match(id);
@@ -25,6 +40,14 @@ export class Matches {
       throw new MatchError('You are not a player in this LagosLife match.');
     const existing = await this.store.platformMatch(id, this.environment);
     if (existing?.game.status === 'finished') return existing;
+    if (existing?.rematchOf && rematchOf && existing.rematchOf !== rematchOf)
+      throw new MatchError('This match already belongs to another rematch.');
+    const source = rematchOf ?? existing?.rematchOf;
+    const invitation = source ? await this.rematchInfo(source, player.id) : null;
+    if (invitation?.existingCode && invitation.existingCode !== existing?.code)
+      throw new MatchError('A rematch already exists. Open it from the previous result.');
+    if (invitation && remote.players.some((p) => !invitation.playerIds.includes(p.playerId)))
+      throw new MatchError('This rematch is reserved for the original players.');
     if (!['open', 'playing'].includes(remote.status) || remote.endsAt <= Date.now())
       throw new MatchError('This LagosLife match has ended or expired.');
     const players = remote.players.map((p) => ({ id: p.playerId, name: p.name }));
@@ -42,12 +65,16 @@ export class Matches {
       ? {
           ...existing,
           players,
+          rematchOf: source,
+          invitedPlayer: existing.invitedPlayer ?? invitation?.opponent,
           expiresAt: remote.endsAt,
           platform: { ...existing.platform!, nonce: remote.nonce ?? null },
           revision: existing.revision + 1,
         }
       : {
           code,
+          rematchOf: source,
+          invitedPlayer: invitation?.opponent,
           environment: this.environment,
           revision: 0,
           players,
@@ -58,6 +85,7 @@ export class Matches {
         };
     if (
       existing &&
+      existing.rematchOf === match.rematchOf &&
       existing.players.length === players.length &&
       existing.players.every((p, i) => p.id === players[i]?.id && p.name === players[i]?.name) &&
       existing.expiresAt === match.expiresAt &&
@@ -69,7 +97,13 @@ export class Matches {
       : await this.store.insert(match);
     if (!saved) {
       const concurrent = await this.store.platformMatch(id, this.environment);
-      if (concurrent && concurrent.players.some((p) => p.id === player.id)) return concurrent;
+      if (concurrent && concurrent.players.some((p) => p.id === player.id)) {
+        if (source && concurrent.rematchOf !== source) {
+          if (attempt >= 2) throw new MatchError('The match changed. Try the rematch again.');
+          return this.importPlatform(id, code, player, source, attempt + 1);
+        }
+        return concurrent;
+      }
       throw new MatchError('This game code is already in use. Please reopen the match.');
     }
     return match;
@@ -80,10 +114,8 @@ export class Matches {
       if (!match.platform?.nonce) continue;
       try {
         const remote = await this.provider.match(match.platform.id);
-        const winner =
-          match.game.scores[0] === match.game.scores[1]
-            ? 'draw'
-            : match.players[match.game.scores[0] > match.game.scores[1] ? 0 : 1].id;
+        const winnerSeat = winnerOf(match.game);
+        const winner = winnerSeat === null ? 'draw' : match.players[winnerSeat].id;
         if (remote.status === 'done' && remote.winner !== winner)
           throw new MatchError('The platform result differs from the saved game.');
         const expired =
@@ -135,10 +167,43 @@ export class Matches {
       recent: record.recent.map((row) => summary(row, playerId)),
     };
   }
-  async create(player: Player): Promise<Match> {
+  async rematchInfo(code: string, playerId: string) {
+    const previous = await this.store.get(code);
+    if (
+      !previous ||
+      previous.environment !== this.environment ||
+      !previous.players.some((p) => p.id === playerId)
+    )
+      throw new MatchError('This game is not available.');
+    if (previous.game.status !== 'finished' || previous.players.length !== 2)
+      throw new MatchError('Finish this game before starting a rematch.');
+    const opponent = previous.players.find((p) => p.id !== playerId)!;
+    const existing = await this.store.rematch(code, this.environment);
+    if (existing && existing.game.status !== 'finished' && existing.expiresAt <= Date.now())
+      throw new MatchError('That rematch expired. Create a new friend game instead.');
+    return {
+      opponent,
+      playerIds: previous.players.map((p) => p.id),
+      existingCode: existing?.code ?? null,
+      mustJoinPlatform: !!existing?.platform && !existing.players.some((p) => p.id === playerId),
+    };
+  }
+  async rematch(code: string, player: Player): Promise<Match> {
+    const info = await this.rematchInfo(code, player.id);
+    if (info.existingCode) return (await this.store.get(info.existingCode))!;
+    if (this.provider?.matchesEnabled)
+      throw new MatchError('Start this rematch through LagosLife.');
+    return this.create(player, code, info.opponent);
+  }
+  async stats(playerId: string) {
+    return this.store.stats(playerId, this.environment);
+  }
+  async create(player: Player, rematchOf?: string, invitedPlayer?: Player): Promise<Match> {
     for (let i = 0; i < 5; i++) {
       const match: Match = {
         environment: this.environment,
+        rematchOf,
+        invitedPlayer,
         code: Array.from({ length: 6 }, () => String.fromCharCode(65 + randomInt(26))).join(''),
         revision: 0,
         players: [player],
@@ -147,12 +212,20 @@ export class Matches {
         expiresAt: Date.now() + 7 * 86400000,
       };
       if (await this.store.insert(match)) return match;
+      if (rematchOf) {
+        const concurrent = await this.store.rematch(rematchOf, this.environment);
+        if (concurrent) return concurrent;
+      }
     }
     throw new MatchError('Could not create a game. Please try again.');
   }
   async get(code: string): Promise<Match> {
     const match = await this.store.get(code);
-    if (!match || match.environment !== this.environment || match.expiresAt <= Date.now())
+    if (
+      !match ||
+      match.environment !== this.environment ||
+      (match.game.status !== 'finished' && match.expiresAt <= Date.now())
+    )
       throw new MatchError('This game code has expired or does not exist.');
     return match;
   }
@@ -163,6 +236,8 @@ export class Matches {
         match = await this.importPlatform(match.platform.id, match.code, player);
       if (match.players.some((p) => p.id === player.id)) return match;
       if (match.platform) throw new MatchError('Join this match through LagosLife first.');
+      if (match.invitedPlayer && match.invitedPlayer.id !== player.id)
+        throw new MatchError('This rematch is reserved for the invited player.');
       if (match.players.length === 2) throw new MatchError('This game already has two players.');
       const next = { ...match, players: [...match.players, player], revision: match.revision + 1 };
       if (await this.store.save(next, match.revision)) return next;
@@ -187,18 +262,21 @@ export class Matches {
     if (match.game.status !== 'playing') throw new MatchError('This game has finished.');
     if (match.revision !== command.revision)
       throw new MatchError('The board changed. Review the latest board and try again.');
-    if (match.game.turn !== seat) throw new MatchError('It is your friend’s turn.');
+    if (command.action.kind !== 'resign' && match.game.turn !== seat)
+      throw new MatchError('It is your friend’s turn.');
     if (match.game.history.length >= 999)
       throw new MatchError('This match has reached its turn limit. Start a new game.');
     let game;
     try {
       const action = command.action;
       game =
-        action.kind === 'play'
-          ? playMove(match.game, action.placements, this.dictionary)
-          : action.kind === 'pass'
-            ? passTurn(match.game)
-            : exchangeTiles(match.game, action.ids);
+        action.kind === 'resign'
+          ? resignGame(match.game, seat)
+          : action.kind === 'play'
+            ? playMove(match.game, action.placements, this.dictionary)
+            : action.kind === 'pass'
+              ? passTurn(match.game)
+              : exchangeTiles(match.game, action.ids);
     } catch (error) {
       throw new MatchError(
         error instanceof Error ? error.message : 'This move could not be played.',
@@ -226,12 +304,16 @@ export function snapshot(match: Match, playerId: string, online: ReadonlySet<str
     phase: match.players.length < 2 ? 'waiting' : match.game.status,
     board: match.game.board,
     rack: match.game.racks[seat],
-    bagCount: match.game.bag.length,
+    bagCount: availableBag(match.game, seat).length,
+    tilesLeft: tilesRemaining(match.game, seat),
+    opponentRackCount: match.players[other] ? match.game.racks[other].length : 0,
     scores: [match.game.scores[seat], match.game.scores[other]],
     turn: match.game.turn === seat ? 0 : 1,
     history: match.game.history.map((h) => ({ ...h, player: h.player === seat ? 0 : 1 })),
     status: match.game.status,
     endReason: match.game.endReason,
+    resignedBy:
+      match.game.resignedBy === undefined ? undefined : match.game.resignedBy === seat ? 0 : 1,
     players: [match.players[seat], match.players[other]]
       .filter((p): p is Player => !!p)
       .map((p) => ({ name: p.name, online: online.has(p.id) })),
@@ -248,6 +330,16 @@ function summary(row: Awaited<ReturnType<Store['list']>>[number], playerId: stri
     scores: [row.scores[seat], row.scores[1 - seat]],
     phase: row.players.length < 2 ? 'waiting' : row.status,
     yourTurn: row.status === 'playing' && row.players.length === 2 && row.turn === seat,
+    expiresAt: row.expiresAt,
+    outcome:
+      row.status !== 'finished'
+        ? null
+        : winnerOf({ scores: row.scores, resignedBy: row.resignedBy ?? undefined }) === null
+          ? 'draw'
+          : winnerOf({ scores: row.scores, resignedBy: row.resignedBy ?? undefined }) === seat
+            ? 'win'
+            : 'loss',
+    resigned: row.resignedBy !== null,
     updatedAt: row.updatedAt.toISOString(),
   };
 }

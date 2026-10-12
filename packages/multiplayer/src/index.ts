@@ -14,7 +14,7 @@ export const historySchema = z
   .array(
     z.object({
       player: z.number().int().min(0).max(1),
-      kind: z.enum(['play', 'pass', 'exchange']),
+      kind: z.enum(['play', 'pass', 'exchange', 'resign']),
       words: z.array(z.string().max(15)).max(8),
       score: z.number().int(),
       placements: z.array(placementSchema).max(7),
@@ -34,6 +34,7 @@ export const commandSchema = z
         .object({ kind: z.literal('exchange'), ids: z.array(z.string().max(8)).min(1).max(7) })
         .strict(),
       z.object({ kind: z.literal('pass') }).strict(),
+      z.object({ kind: z.literal('resign') }).strict(),
     ]),
   })
   .strict();
@@ -46,11 +47,14 @@ export const snapshotSchema = z.object({
   board: boardSchema,
   rack: z.array(tileSchema).max(7),
   bagCount: z.number().int().min(0).max(100),
+  tilesLeft: z.number().int().min(0).max(60).nullable().default(null),
+  opponentRackCount: z.number().int().min(0).max(7).default(0),
   scores: z.tuple([z.number().int(), z.number().int()]),
   turn: z.number().int().min(0).max(1),
   history: historySchema,
   status: z.enum(['playing', 'finished']),
-  endReason: z.enum(['rack-empty', 'scoreless']).nullable(),
+  endReason: z.enum(['rack-empty', 'scoreless', 'resigned']).nullable(),
+  resignedBy: z.number().int().min(0).max(1).optional(),
   players: z
     .array(z.object({ name: z.string().max(80), online: z.boolean() }))
     .min(1)
@@ -66,6 +70,9 @@ export const replySchema = z.object({
 export const runtimeSchema = z.object({
   authMode: z.enum(['local', 'vatar', 'disabled']),
   platformMatches: z.boolean().default(false),
+  themeProducts: z
+    .array(z.object({ id: z.string(), name: z.string(), price: z.number().int() }))
+    .default([]),
   themeProduct: z
     .object({ id: z.string(), name: z.string(), price: z.number().int() })
     .nullable()
@@ -78,6 +85,9 @@ export const gameSummarySchema = z.object({
   scores: z.tuple([z.number().int(), z.number().int()]),
   phase: z.enum(['waiting', 'playing', 'finished']),
   yourTurn: z.boolean(),
+  expiresAt: z.number(),
+  outcome: z.enum(['win', 'loss', 'draw']).nullable(),
+  resigned: z.boolean(),
   updatedAt: z.string(),
 });
 export type GameSummary = z.infer<typeof gameSummarySchema>;
@@ -94,3 +104,65 @@ export const recordSchema = z.object({
   recent: z.array(gameSummarySchema).max(20),
 });
 export type PlayerRecord = z.infer<typeof recordSchema>;
+
+export const themeCatalog = [
+  {
+    id: 'classic',
+    productId: null,
+    name: 'Classic',
+    price: 0,
+    subtitle: 'The original word club',
+    description: 'Fresh greens, familiar tiles. Always yours.',
+  },
+  {
+    id: 'sunset',
+    productId: 'sunset_board',
+    name: 'Sunset',
+    price: 500,
+    subtitle: 'A softer kind of evening',
+    description: 'Warm peach, dusty rose and a little golden-hour magic.',
+  },
+  {
+    id: 'midnight',
+    productId: 'midnight_board',
+    name: 'Midnight',
+    price: 500,
+    subtitle: 'For your after-hours words',
+    description: 'Deep navy, soft blue highlights and crisp cream letters.',
+  },
+  {
+    id: 'ankara',
+    productId: 'ankara_board',
+    name: 'Ankara',
+    price: 500,
+    subtitle: 'Colour with a little rhythm',
+    description: 'Woven patterns and joyful accents around a clear, calm board.',
+  },
+  {
+    id: 'royal',
+    productId: 'royal_board',
+    name: 'Royal',
+    price: 500,
+    subtitle: 'Every word deserves a crown',
+    description: 'Emerald, ivory and gold. A table fit for your best words.',
+  },
+] as const;
+export type ThemeId = (typeof themeCatalog)[number]['id'];
+export const themeIdSchema = z.enum(['classic', 'sunset', 'midnight', 'ankara', 'royal']);
+export const themeOwnershipSchema = z.object({
+  owned: z.boolean(),
+  themes: z.array(themeIdSchema).default([]),
+});
+export const statsSchema = z.object({
+  played: z.number().int(),
+  wins: z.number().int(),
+  losses: z.number().int(),
+  draws: z.number().int(),
+  bestScore: z.number().int().nullable(),
+  bestMove: z.number().int(),
+  bestWords: z.array(z.string()),
+  words: z.number().int(),
+  bingos: z.number().int(),
+  yourTurn: z.number().int(),
+});
+export type PlayerStats = z.infer<typeof statsSchema>;

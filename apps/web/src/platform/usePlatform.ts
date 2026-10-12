@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react';
-import { z } from 'zod';
-import { runtimeSchema } from '@word-lagos/multiplayer';
+import {
+  runtimeSchema,
+  themeOwnershipSchema,
+  themeIdSchema,
+  themeCatalog,
+  type ThemeId,
+} from '@word-lagos/multiplayer';
 import { importPlatformMatch, jsonRequest, session } from '../multiplayer/client';
 import { initializeVatar, platformMatchSchema, vatar, type PlatformIdentity } from './sdk';
 
-const ownershipSchema = z.object({ owned: z.boolean() });
+const ownershipSchema = themeOwnershipSchema;
 export function usePlatform() {
   const [identity, setIdentity] = useState<PlatformIdentity | null>(null);
-  const [product, setProduct] = useState<z.infer<typeof runtimeSchema>['themeProduct']>(null);
-  const [owned, setOwned] = useState(false);
-  const [theme, setTheme] = useState<'classic' | 'sunset'>('classic');
+  const [products, setProducts] = useState<{ id: string; name: string; price: number }[]>([]);
+  const [ownedThemes, setOwnedThemes] = useState<ThemeId[]>([]);
+  const [theme, setTheme] = useState<ThemeId>('classic');
+  const [previewTheme, setPreviewTheme] = useState<ThemeId | null>(null);
+  const [demo, setDemo] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -32,12 +39,17 @@ export function usePlatform() {
           body: JSON.stringify({ purchaseId }),
         }),
       );
-      if (active) setOwned(result.owned);
+      if (active) setOwnedThemes(result.themes);
     }
     void (async () => {
       const config = runtimeSchema.parse(await jsonRequest('/api/config'));
-      if (!active || config.authMode !== 'vatar' || window.parent === window) return;
-      setProduct(config.themeProduct);
+      if (!active) return;
+      if (config.authMode === 'local') {
+        setDemo(true);
+        return;
+      }
+      if (config.authMode !== 'vatar' || window.parent === window) return;
+      setProducts(config.themeProducts);
       const player = await initializeVatar();
       if (!active) return;
       setIdentity(player);
@@ -79,7 +91,7 @@ export function usePlatform() {
           if (active) setError('Could not restore your platform match. Try My games to reconnect.');
         }
       }
-      if (config.themeProduct) {
+      if (config.themeProducts.length) {
         const pending = await sdk.purchases();
         for (const purchase of pending) await claim(purchase.purchaseId);
         const token = await session();
@@ -89,14 +101,16 @@ export function usePlatform() {
           }),
         );
         if (active) {
-          setOwned(result.owned);
-          if (!result.owned) setTheme('classic');
+          setOwnedThemes(result.themes);
           try {
-            if (
-              result.owned &&
-              localStorage.getItem(`wordpadi:theme:${player.mode}:${player.player.id}`) === 'sunset'
-            )
-              setTheme('sunset');
+            const stored = themeIdSchema.safeParse(
+              localStorage.getItem(`wordpadi:theme:${player.mode}:${player.player.id}`),
+            );
+            setTheme(
+              stored.success && (stored.data === 'classic' || result.themes.includes(stored.data))
+                ? stored.data
+                : 'classic',
+            );
           } catch {
             /* Theme choice remains available in memory. */
           }
@@ -111,8 +125,20 @@ export function usePlatform() {
       unsubscribe.forEach((fn) => fn());
     };
   }, [attempt]);
-  async function buy() {
-    if (!product || busy) return;
+  async function buy(themeId: ThemeId) {
+    if (busy) return;
+    if (demo) {
+      setOwnedThemes((current) => [...new Set([...current, themeId])]);
+      setTheme(themeId);
+      setPreviewTheme(null);
+      return;
+    }
+    const catalog = themeCatalog.find((t) => t.id === themeId);
+    const product = products.find((p) => p.id === catalog?.productId);
+    if (!product) {
+      setError('This theme is not available for purchase yet.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -125,8 +151,8 @@ export function usePlatform() {
           body: JSON.stringify({ purchaseId: purchase.purchaseId }),
         }),
       );
-      setOwned(result.owned);
-      if (result.owned) chooseTheme('sunset', true);
+      setOwnedThemes(result.themes);
+      if (result.themes.includes(themeId)) chooseTheme(themeId, true);
     } catch (cause) {
       const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : '';
       setError(
@@ -140,8 +166,9 @@ export function usePlatform() {
       setBusy(false);
     }
   }
-  function chooseTheme(next: 'classic' | 'sunset', justPurchased = false) {
-    if (next === 'sunset' && !owned && !justPurchased) return;
+  function chooseTheme(next: ThemeId, justPurchased = false) {
+    if (next !== 'classic' && !ownedThemes.includes(next) && !justPurchased) return;
+    setPreviewTheme(null);
     setTheme(next);
     if (identity)
       try {
@@ -152,8 +179,11 @@ export function usePlatform() {
   }
   return {
     identity,
-    product,
-    owned,
+    products,
+    ownedThemes,
+    demo,
+    previewTheme,
+    preview: setPreviewTheme,
     theme,
     error,
     busy,

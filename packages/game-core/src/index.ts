@@ -18,7 +18,7 @@ export type MoveResult =
   | { ok: false; error: string; words?: WordScore[] };
 export type HistoryEntry = {
   player: number;
-  kind: 'play' | 'pass' | 'exchange';
+  kind: 'play' | 'pass' | 'exchange' | 'resign';
   words: string[];
   score: number;
   placements: Placement[];
@@ -29,6 +29,7 @@ export type Game = {
   mode: Mode;
   board: Board;
   bag: Tile[];
+  tileSupply?: 'personal-60';
   racks: Tile[][];
   scores: number[];
   turn: number;
@@ -36,7 +37,8 @@ export type Game = {
   scoreless: number;
   rng: number;
   status: 'playing' | 'finished';
-  endReason: 'rack-empty' | 'scoreless' | null;
+  endReason: 'rack-empty' | 'scoreless' | 'resigned' | null;
+  resignedBy?: number;
 };
 const DISTRIBUTION: Record<string, [number, number]> = {
   A: [9, 1],
@@ -67,6 +69,53 @@ const DISTRIBUTION: Record<string, [number, number]> = {
   Z: [1, 10],
   '?': [2, 0],
 };
+export const PERSONAL_DISTRIBUTION: Readonly<Record<string, number>> = {
+  A: 6,
+  E: 8,
+  I: 6,
+  O: 5,
+  U: 3,
+  B: 1,
+  C: 1,
+  D: 2,
+  F: 1,
+  G: 1,
+  H: 1,
+  J: 1,
+  K: 1,
+  L: 2,
+  M: 1,
+  N: 3,
+  P: 1,
+  Q: 1,
+  R: 3,
+  S: 2,
+  T: 3,
+  V: 1,
+  W: 1,
+  X: 1,
+  Y: 1,
+  Z: 1,
+  '?': 2,
+};
+export function availableBag(game: Pick<Game, 'bag' | 'tileSupply'>, player: number): Tile[] {
+  return game.tileSupply === 'personal-60'
+    ? game.bag.filter((tile) => tile.id.startsWith(`${player}:`))
+    : game.bag;
+}
+export function tilesRemaining(game: Game, player: number): number | null {
+  return game.tileSupply === 'personal-60'
+    ? availableBag(game, player).length + game.racks[player].length
+    : null;
+}
+function draw(bag: Tile[], count: number, player: number, personal: boolean): Tile[] {
+  const drawn: Tile[] = [];
+  for (let i = 0; i < bag.length && drawn.length < count;) {
+    if (!personal || bag[i].id.startsWith(`${player}:`)) drawn.push(...bag.splice(i, 1));
+    else i++;
+  }
+  return drawn;
+}
 export const tileValue = (letter: string): number => DISTRIBUTION[letter]?.[1] ?? 0;
 export const emptyBoard = (): Board =>
   Array.from({ length: SIZE }, () => Array<BoardTile | null>(SIZE).fill(null));
@@ -277,17 +326,29 @@ function shuffled<T>(items: T[], seed: number): [T[], number] {
   }
   return [result, seed];
 }
-export function createGame(mode: Mode, seed: number): Game {
-  const tiles = Object.entries(DISTRIBUTION).flatMap(([letter, [count]]) =>
-    Array.from({ length: count }, (_, i) => ({ id: `${letter}${i}`, letter })),
-  );
+export function createGame(
+  mode: Mode,
+  seed: number,
+  supply: 'personal-60' | 'shared-100' = 'personal-60',
+): Game {
+  const personal = supply === 'personal-60';
+  const tiles = personal
+    ? [0, 1].flatMap((player) =>
+        Object.entries(PERSONAL_DISTRIBUTION).flatMap(([letter, count]) =>
+          Array.from({ length: count }, (_, i) => ({ id: `${player}:${letter}${i}`, letter })),
+        ),
+      )
+    : Object.entries(DISTRIBUTION).flatMap(([letter, [count]]) =>
+        Array.from({ length: count }, (_, i) => ({ id: `${letter}${i}`, letter })),
+      );
   const [bag, rng] = shuffled(tiles, seed || 1);
-  const racks = [bag.splice(0, 7), bag.splice(0, 7)];
+  const racks = [draw(bag, 7, 0, personal), draw(bag, 7, 1, personal)];
   return {
     version: 1,
     dictionary: DICTIONARY_VERSION,
     mode,
     board: emptyBoard(),
+    tileSupply: personal ? 'personal-60' : undefined,
     bag,
     racks,
     scores: racks.map(() => 0),
@@ -305,7 +366,8 @@ function endTurn(game: Game, entry: HistoryEntry): Game {
     history: [...game.history, entry],
     scoreless: entry.score > 0 ? 0 : game.scoreless + 1,
   };
-  const emptied = next.bag.length === 0 && next.racks[entry.player].length === 0;
+  const emptied =
+    availableBag(next, entry.player).length === 0 && next.racks[entry.player].length === 0;
   if (emptied || next.scoreless >= 6) {
     const penalties = next.racks.map((rack) => rack.reduce((n, t) => n + tileValue(t.letter), 0));
     next.scores = next.scores.map((n, i) => n - penalties[i]);
@@ -329,7 +391,9 @@ export function playMove(
     bag = game.bag.slice(),
     scores = game.scores.slice();
   racks[game.turn] = racks[game.turn].filter((t) => !used.has(t.id));
-  racks[game.turn].push(...bag.splice(0, RACK_SIZE - racks[game.turn].length));
+  racks[game.turn].push(
+    ...draw(bag, RACK_SIZE - racks[game.turn].length, game.turn, game.tileSupply === 'personal-60'),
+  );
   scores[game.turn] += result.score;
   return endTurn(
     { ...game, board: result.board, racks, bag, scores },
@@ -348,7 +412,8 @@ export function passTurn(game: Game): Game {
 }
 export function exchangeTiles(game: Game, ids: string[]): Game {
   if (game.status !== 'playing') throw new Error('This game has finished.');
-  if (game.bag.length < 7) throw new Error('You need at least seven tiles in the bag to swap.');
+  if (availableBag(game, game.turn).length < 7)
+    throw new Error('You need at least seven tiles in the bag to swap.');
   if (
     !ids.length ||
     new Set(ids).size !== ids.length ||
@@ -357,12 +422,36 @@ export function exchangeTiles(game: Game, ids: string[]): Game {
     throw new Error('Choose tiles from your rack to swap.');
   const racks = game.racks.map((r) => r.slice());
   const returned = racks[game.turn].filter((t) => ids.includes(t.id));
-  const bag = game.bag.slice();
+  const bag = availableBag(game, game.turn).slice();
   racks[game.turn] = racks[game.turn].filter((t) => !ids.includes(t.id));
   racks[game.turn].push(...bag.splice(0, ids.length));
   const [mixed, rng] = shuffled([...bag, ...returned], game.rng);
   return endTurn(
-    { ...game, racks, bag: mixed, rng },
+    {
+      ...game,
+      racks,
+      bag:
+        game.tileSupply === 'personal-60'
+          ? [...game.bag.filter((t) => !t.id.startsWith(`${game.turn}:`)), ...mixed]
+          : mixed,
+      rng,
+    },
     { player: game.turn, kind: 'exchange', words: [], score: 0, placements: [] },
   );
+}
+
+export function resignGame(game: Game, player: number): Game {
+  if (game.status !== 'playing') throw new Error('This game has finished.');
+  if (player !== 0 && player !== 1) throw new Error('Invalid player.');
+  return {
+    ...game,
+    status: 'finished',
+    endReason: 'resigned',
+    resignedBy: player,
+    history: [...game.history, { player, kind: 'resign', words: [], score: 0, placements: [] }],
+  };
+}
+export function winnerOf(game: { scores: number[]; resignedBy?: number }): number | null {
+  if (game.resignedBy !== undefined) return 1 - game.resignedBy;
+  return game.scores[0] === game.scores[1] ? null : game.scores[0] > game.scores[1] ? 0 : 1;
 }

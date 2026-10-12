@@ -1,6 +1,12 @@
 import { Client, type Room } from '@colyseus/sdk';
 import { z } from 'zod';
-import { runtimeSchema, codeSchema, gameListSchema, recordSchema } from '@word-lagos/multiplayer';
+import {
+  statsSchema,
+  runtimeSchema,
+  codeSchema,
+  gameListSchema,
+  recordSchema,
+} from '@word-lagos/multiplayer';
 
 import { vatar, platformMatchSchema } from '../platform/sdk';
 
@@ -20,6 +26,7 @@ export async function jsonRequest(path: string, options: RequestInit = {}): Prom
   }
   return data;
 }
+let localSessionRequest: Promise<string> | undefined;
 let platformSession: { session: string; exp: number } | undefined;
 let renewingSession: Promise<{ session: string; exp: number }> | undefined;
 export async function session(): Promise<string> {
@@ -41,27 +48,43 @@ export async function session(): Promise<string> {
     return (await renewingSession).session;
   }
   // Development-only identities are issued by a loopback server. Tabs act as separate players.
-  let token = sessionStorage.getItem('word-lagos:local-player');
-  if (!token) {
-    const player = z
-      .object({ token: z.string(), name: z.string() })
-      .parse(await jsonRequest('/api/local-player', { method: 'POST' }));
-    token = player.token;
-    sessionStorage.setItem('word-lagos:local-player', token);
-  }
-  return token;
+  const token = sessionStorage.getItem('word-lagos:local-player');
+  if (token) return token;
+  if (!localSessionRequest)
+    localSessionRequest = jsonRequest('/api/local-player', { method: 'POST' })
+      .then((value) => {
+        const player = z.object({ token: z.string(), name: z.string() }).parse(value);
+        sessionStorage.setItem('word-lagos:local-player', player.token);
+        return player.token;
+      })
+      .finally(() => {
+        localSessionRequest = undefined;
+      });
+  return localSessionRequest;
 }
-export async function createFriendGame(): Promise<string> {
+export async function createFriendGame(rematchOf?: string): Promise<string> {
   const config = runtimeSchema.parse(await jsonRequest('/api/config'));
+  if (rematchOf) {
+    const token = await session();
+    const info = z
+      .object({ existingCode: codeSchema.nullable(), mustJoinPlatform: z.boolean() })
+      .parse(
+        await jsonRequest(`/api/friends/${rematchOf}/rematch`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      );
+    if (info.existingCode)
+      return info.mustJoinPlatform ? joinFriendCode(info.existingCode) : info.existingCode;
+  }
   if (config.authMode === 'vatar' && config.platformMatches) {
     const match = platformMatchSchema.parse(
       await (await vatar()).match.create({ stake: 0, seats: 2 }),
     );
-    return importPlatformMatch(match);
+    return importPlatformMatch(match, rematchOf);
   }
   const token = await session();
   return z.object({ code: codeSchema }).parse(
-    await jsonRequest('/api/friends', {
+    await jsonRequest(rematchOf ? `/api/friends/${rematchOf}/rematch` : '/api/friends', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     }),
@@ -99,13 +122,16 @@ export async function playerRecord(code: string) {
   );
 }
 
-export async function importPlatformMatch(match: { id: string; code: string }): Promise<string> {
+export async function importPlatformMatch(
+  match: { id: string; code: string },
+  rematchOf?: string,
+): Promise<string> {
   const token = await session();
   return z.object({ code: codeSchema }).parse(
     await jsonRequest('/api/platform/matches', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: match.id, code: match.code }),
+      body: JSON.stringify({ id: match.id, code: match.code, rematchOf }),
     }),
   ).code;
 }
@@ -114,4 +140,11 @@ export async function joinFriendCode(code: string): Promise<string> {
   if (config.authMode !== 'vatar' || !config.platformMatches) return code;
   const match = platformMatchSchema.parse(await (await vatar()).match.join(code));
   return importPlatformMatch(match);
+}
+
+export async function playerStats() {
+  const token = await session();
+  return statsSchema.parse(
+    await jsonRequest('/api/me/stats', { headers: { Authorization: `Bearer ${token}` } }),
+  );
 }

@@ -6,7 +6,13 @@ import { and, eq, sql, desc } from 'drizzle-orm';
 import pg from 'pg';
 import type { Purchase } from './vatar';
 import { z } from 'zod';
-import { boardSchema, historySchema, tileSchema, codeSchema } from '@word-lagos/multiplayer';
+import {
+  statsSchema,
+  boardSchema,
+  historySchema,
+  tileSchema,
+  codeSchema,
+} from '@word-lagos/multiplayer';
 
 export const playerSchema = z.object({
   id: z.string().min(1).max(160),
@@ -23,7 +29,8 @@ export const matchSchema = z.object({
     dictionary: z.literal('word-list-4.1.0'),
     mode: z.literal('friends'),
     board: boardSchema,
-    bag: z.array(tileSchema).max(100),
+    bag: z.array(tileSchema).max(120),
+    tileSupply: z.literal('personal-60').optional(),
     racks: z.array(z.array(tileSchema).max(7)).length(2),
     scores: z.array(z.number().int()).length(2),
     turn: z.number().int().min(0).max(1),
@@ -31,12 +38,15 @@ export const matchSchema = z.object({
     scoreless: z.number().int().min(0).max(6),
     rng: z.number().int().nonnegative(),
     status: z.enum(['playing', 'finished']),
-    endReason: z.enum(['rack-empty', 'scoreless']).nullable(),
+    endReason: z.enum(['rack-empty', 'scoreless', 'resigned']).nullable(),
+    resignedBy: z.number().int().min(0).max(1).optional(),
   }),
   receipts: z
     .array(z.object({ id: z.string(), playerId: z.string(), digest: z.string() }))
     .max(1000),
   expiresAt: z.number(),
+  rematchOf: codeSchema.optional(),
+  invitedPlayer: playerSchema.optional(),
   platform: z
     .object({
       id: z.string(),
@@ -110,6 +120,15 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
       sql`ALTER TABLE friend_matches ADD CONSTRAINT friend_matches_code_check CHECK (code ~ '^[A-Z0-9]{6}$')`,
     );
   });
+  await db.transaction(async (tx) => {
+    const applied = await tx.execute(
+      sql`INSERT INTO schema_migrations(version) VALUES (2) ON CONFLICT DO NOTHING RETURNING version`,
+    );
+    if (!applied.rows.length) return;
+    await tx.execute(
+      sql`CREATE UNIQUE INDEX friend_matches_rematch ON friend_matches ((coalesce(data->>'environment','local')), (data->>'rematchOf')) WHERE data->>'rematchOf' IS NOT NULL`,
+    );
+  });
   const owned = (playerId: string, environment: string) =>
     and(
       sql`${matches.data}->'players' @> ${JSON.stringify([{ id: playerId }])}::jsonb`,
@@ -121,6 +140,8 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
     players: sql<Player[]>`${matches.data}->'players'`,
     scores: sql<number[]>`${matches.data}->'game'->'scores'`,
     turn: sql<number>`(${matches.data}->'game'->>'turn')::int`,
+    resignedBy: sql<number | null>`(${matches.data}->'game'->>'resignedBy')::int`,
+    expiresAt: sql<number>`(${matches.data}->>'expiresAt')::double precision`,
     status: sql<'playing' | 'finished'>`${matches.data}->'game'->>'status'`,
     updatedAt: matches.updatedAt,
   };
@@ -157,7 +178,11 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
         .set({ status: 'refunded', updatedAt: sql`now()` })
         .where(and(eq(purchases.id, id), eq(purchases.environment, environment)));
     },
-    async ownsTheme(playerId: string, environment: string): Promise<boolean> {
+    async ownsTheme(
+      playerId: string,
+      environment: string,
+      productId = 'sunset_board',
+    ): Promise<boolean> {
       const rows = await db
         .select({ id: purchases.id })
         .from(purchases)
@@ -165,7 +190,7 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
           and(
             eq(purchases.playerId, playerId),
             eq(purchases.environment, environment),
-            eq(purchases.productId, 'sunset_board'),
+            eq(purchases.productId, productId),
             sql`${purchases.status} <> 'refunded'`,
           ),
         )
@@ -174,13 +199,12 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
     },
     async ownedPurchases(playerId: string, environment: string) {
       return db
-        .select({ id: purchases.id })
+        .select({ id: purchases.id, productId: purchases.productId })
         .from(purchases)
         .where(
           and(
             eq(purchases.playerId, playerId),
             eq(purchases.environment, environment),
-            eq(purchases.productId, 'sunset_board'),
             sql`${purchases.status} <> 'refunded'`,
           ),
         )
@@ -247,7 +271,7 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
         sql`${matches.data}->'players' @> ${JSON.stringify([{ id: opponentId }])}::jsonb`,
         finished,
       );
-      const scoreDifference = sql`CASE WHEN ${matches.data}->'players'->0->>'id' = ${playerId}
+      const scoreDifference = sql`CASE WHEN ${matches.data}->'game'->>'resignedBy' IS NOT NULL THEN CASE WHEN ${matches.data}->'players'->((${matches.data}->'game'->>'resignedBy')::int)->>'id' = ${playerId} THEN -1 ELSE 1 END WHEN ${matches.data}->'players'->0->>'id' = ${playerId}
         THEN (${matches.data}->'game'->'scores'->>0)::int - (${matches.data}->'game'->'scores'->>1)::int
         ELSE (${matches.data}->'game'->'scores'->>1)::int - (${matches.data}->'game'->'scores'->>0)::int END`;
       const [counts] = await db
@@ -266,6 +290,50 @@ export async function openStore(databaseUrl?: string, localPath?: string) {
         .orderBy(desc(matches.updatedAt), desc(matches.code))
         .limit(20);
       return { ...counts, recent };
+    },
+    async rematch(source: string, environment: string): Promise<Match | null> {
+      const [row] = await db
+        .select()
+        .from(matches)
+        .where(
+          and(
+            sql`coalesce(${matches.data}->>'environment','local') = ${environment}`,
+            sql`${matches.data}->>'rematchOf' = ${source}`,
+          ),
+        )
+        .limit(1);
+      return row ? matchSchema.parse(row.data) : null;
+    },
+    async stats(playerId: string, environment: string) {
+      const result = await db.execute(sql`
+        WITH owned_games AS (
+          SELECT data, CASE WHEN data->'players'->0->>'id' = ${playerId} THEN 0 ELSE 1 END AS seat
+          FROM friend_matches WHERE data->'players' @> ${JSON.stringify([{ id: playerId }])}::jsonb
+          AND coalesce(data->>'environment','local') = ${environment}
+        ), completed AS (
+          SELECT *, (data->'game'->'scores'->>seat)::int AS score,
+          CASE WHEN data->'game'->>'resignedBy' IS NOT NULL
+            THEN CASE WHEN (data->'game'->>'resignedBy')::int = seat THEN -1 ELSE 1 END
+            ELSE (data->'game'->'scores'->>seat)::int - (data->'game'->'scores'->>(1-seat))::int END AS outcome
+          FROM owned_games WHERE data->'game'->>'status' = 'finished'
+        ), moves AS (
+          SELECT move FROM owned_games, jsonb_array_elements(data->'game'->'history') AS move
+          WHERE (move->>'player')::int = seat AND move->>'kind' = 'play'
+        ) SELECT
+          (SELECT count(*)::int FROM completed) AS played,
+          (SELECT count(*)::int FROM completed WHERE outcome > 0) AS wins,
+          (SELECT count(*)::int FROM completed WHERE outcome < 0) AS losses,
+          (SELECT count(*)::int FROM completed WHERE outcome = 0) AS draws,
+          (SELECT max(score) FROM completed) AS "bestScore",
+          coalesce((SELECT max((move->>'score')::int) FROM moves),0) AS "bestMove",
+          coalesce((SELECT move->'words' FROM moves ORDER BY (move->>'score')::int DESC, move->'words' LIMIT 1),'[]'::jsonb) AS "bestWords",
+          (SELECT coalesce(sum(jsonb_array_length(move->'words')),0)::int FROM moves) AS words,
+          (SELECT count(*)::int FROM moves WHERE jsonb_array_length(move->'placements') = 7) AS bingos,
+          (SELECT count(*)::int FROM owned_games WHERE data->'game'->>'status' = 'playing'
+            AND jsonb_array_length(data->'players') = 2 AND (data->'game'->>'turn')::int = seat
+            AND (data->>'expiresAt')::numeric > extract(epoch from now()) * 1000) AS "yourTurn"
+      `);
+      return statsSchema.parse(result.rows[0]);
     },
     async get(code: string): Promise<Match | null> {
       const [row] = await db.select().from(matches).where(eq(matches.code, code));

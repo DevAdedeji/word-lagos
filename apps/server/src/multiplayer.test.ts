@@ -271,8 +271,11 @@ describe('active games and head-to-head records', () => {
     expect(body.games[0]).toMatchObject({ phase: 'waiting', opponent: null, scores: [0, 0] });
     expect(Object.keys(body.games[0]).sort()).toEqual([
       'code',
+      'expiresAt',
       'opponent',
+      'outcome',
       'phase',
+      'resigned',
       'scores',
       'updatedAt',
       'yourTurn',
@@ -313,4 +316,23 @@ describe('active games and head-to-head records', () => {
     );
     expect((await matches.record(record.recent[0].code, a.id)).played).toBe(3);
   });
+});
+
+it('protects stats and rematch HTTP endpoints and returns only the authenticated record', async () => {
+  const issued = await auth.issueLocal();
+  const me = await auth.verify(issued.token);
+  const opponent = { id: randomUUID(), name: 'Friend' };
+  const game = await matches.join((await matches.create(me)).code, opponent);
+  await matches.act(game.code, opponent.id, command(game.revision, { kind: 'resign' }));
+  const base = `http://127.0.0.1:${server.port}`;
+  for (const path of ['/api/me/stats', `/api/friends/${game.code}/rematch`])
+    expect((await fetch(base + path)).status).toBe(401);
+  const headers = { Authorization: `Bearer ${issued.token}` };
+  const stats = await fetch(base + '/api/me/stats', { headers });
+  expect(stats.headers.get('cache-control')).toBe('no-store');
+  expect(await stats.json()).toMatchObject({ played: 1, wins: 1, losses: 0 });
+  const one = await fetch(base + `/api/friends/${game.code}/rematch`, { method: 'POST', headers });
+  const two = await fetch(base + `/api/friends/${game.code}/rematch`, { method: 'POST', headers });
+  expect(one.status).toBe(200);
+  expect(await one.json()).toEqual(await two.json());
 });

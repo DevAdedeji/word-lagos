@@ -11,7 +11,7 @@ import { Matches, MatchError } from './matches';
 import type { Store } from './store';
 import { friendRoom } from './room';
 import { VatarError } from './vatar';
-import { Purchases, themeProduct } from './purchases';
+import { Purchases, themeProduct, themeProducts } from './purchases';
 export async function startServer({
   store,
   auth,
@@ -56,6 +56,7 @@ export async function startServer({
       authMode: auth.mode,
       platformMatches,
       themeProduct: purchases ? themeProduct : null,
+      themeProducts: purchases ? themeProducts : [],
     }),
   );
   app.use(
@@ -71,7 +72,8 @@ export async function startServer({
     res.setHeader('Cache-Control', 'no-store');
     try {
       const identity = await auth.verify(bearer(req));
-      res.json({ owned: purchases ? await purchases.owned(identity.id) : false });
+      const themes = purchases ? await purchases.ownedThemes(identity.id) : [];
+      res.json({ owned: themes.includes('sunset'), themes });
     } catch (error) {
       next(error);
     }
@@ -85,7 +87,8 @@ export async function startServer({
         .parse(req.body);
       if (!purchases) throw new VatarError('Purchases are unavailable.');
       await purchases.claim(identity.id, purchaseId);
-      res.json({ owned: await purchases.owned(identity.id) });
+      const themes = await purchases.ownedThemes(identity.id);
+      res.json({ owned: themes.includes('sunset'), themes });
     } catch (error) {
       next(error);
     }
@@ -93,11 +96,15 @@ export async function startServer({
   app.post('/api/platform/matches', async (req, res, next) => {
     try {
       const identity = await auth.verify(bearer(req));
-      const { id, code } = z
-        .object({ id: z.string().min(1).max(160), code: codeSchema })
+      const { id, code, rematchOf } = z
+        .object({
+          id: z.string().min(1).max(160),
+          code: codeSchema,
+          rematchOf: codeSchema.optional(),
+        })
         .strict()
         .parse(req.body);
-      const match = await matches.importPlatform(id, code, identity);
+      const match = await matches.importPlatform(id, code, identity, rematchOf);
       res.json({ code: match.code });
     } catch (error) {
       next(error);
@@ -130,6 +137,38 @@ export async function startServer({
     try {
       const identity = await auth.verify(bearer(req));
       res.json(await matches.record(codeSchema.parse(req.params.code), identity.id));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/me/stats', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await auth.verify(bearer(req));
+      res.json(await matches.stats(identity.id));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/friends/:code/rematch', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await auth.verify(bearer(req));
+      const info = await matches.rematchInfo(codeSchema.parse(req.params.code), identity.id);
+      res.json({
+        opponent: info.opponent.name,
+        existingCode: info.existingCode,
+        mustJoinPlatform: info.mustJoinPlatform,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/friends/:code/rematch', async (req, res, next) => {
+    try {
+      const identity = await auth.verify(bearer(req));
+      const match = await matches.rematch(codeSchema.parse(req.params.code), identity);
+      res.json({ code: match.code });
     } catch (error) {
       next(error);
     }

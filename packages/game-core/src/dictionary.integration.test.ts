@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
 import wordListPath from 'word-list';
 import { expect, it } from 'vitest';
-import { createGame, evaluateMove, exchangeTiles, makeLexicon, passTurn, playMove } from './index';
+import {
+  availableBag,
+  createGame,
+  evaluateMove,
+  exchangeTiles,
+  makeLexicon,
+  passTurn,
+  playMove,
+} from './index';
 import { buildTrie, findBotMove } from './bot';
 it('plays a complete game with the shipped dictionary while conserving every tile', () => {
   const dictionary = makeLexicon(readFileSync(wordListPath, 'utf8'));
@@ -15,7 +23,7 @@ it('plays a complete game with the shipped dictionary while conserving every til
       game = playMove(game, move.placements, dictionary);
     } else
       game =
-        game.bag.length >= 7
+        availableBag(game, game.turn).length >= 7
           ? exchangeTiles(
               game,
               rack.map((t) => t.id),
@@ -26,8 +34,8 @@ it('plays a complete game with the shipped dictionary while conserving every til
       ...game.racks.flat(),
       ...game.board.flat().filter((t) => t !== null),
     ].map((t) => t.id);
-    expect(ids).toHaveLength(100);
-    expect(new Set(ids).size).toBe(100);
+    expect(ids).toHaveLength(120);
+    expect(new Set(ids).size).toBe(120);
   }
   expect(game.status).toBe('finished');
   expect(game.history.length).toBeGreaterThan(10);

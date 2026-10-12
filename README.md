@@ -28,7 +28,7 @@ The server reads the root `.env`. Without `DATABASE_URL`, development uses an em
 - Friendly two-player matches with invitation codes, private racks, live turn/score updates, automatic reconnect attempts and manual reconnect.
 - Server validation of identity, membership, turn, tile ownership, words and scores. Revision checks and command receipts prevent concurrent or duplicate moves from being applied twice.
 - Accepted multiplayer moves persist before acknowledgment. Disconnecting keeps the seat reserved; return with the same identity and code. Matches expire after seven days. There is no turn clock or disconnect forfeiture yet.
-- A full-width, zoomable 15×15 board, 100-tile bag, blanks, premiums, crossing words and seven-tile bonuses.
+- A full-width, zoomable 15×15 board, personal 60-tile supplies (2 blanks, 28 vowels, 30 consonants each), premiums, crossing words and seven-tile bonuses.
 - Phone-first layout with a pinned rack, prominent Submit, on-board word outlines, and recall/swap/pass icons with title-only tooltips.
 - Local Ayo saves, word lookup, move history, endgame settlement and retry states.
 
@@ -97,3 +97,29 @@ Phone QA: http://127.0.0.1:43127/embed-preview.html provides a 390px iframe prev
 **word-list 4.1.0**, pinned in the lockfile, supplies 269,870 alphabetic entries of length 2–15. This is a casual English list, not an official tournament dictionary. Licensing ships in `apps/web/public/dictionary-license.txt`. The build regenerates the ignored `words.txt` for browser and server.
 
 The active-game switcher and head-to-head records need to be deployed before using the new listing screenshots. The game has not been submitted to LagosLife. Fonts load from Google Fonts with local fallbacks.
+
+## Local feature preview (not deployed)
+
+My games includes a your-turn count, expiry clocks, rematches reserved for the same opponent,
+and account statistics for friend games. Resigning ends a match immediately, even off-turn;
+the other player wins regardless of the current scores. Completed games show a result screen.
+Rematches use a fresh code to share with the same opponent; no invitation message is sent automatically.
+Ayo games remain on the device and are excluded from account statistics and achievements.
+
+Tiles support pointer dragging from rack to board, between empty board squares and back to
+the rack before submission. Tap-to-place/recall remains available. Purple outlines identify
+the opponent’s last placed tiles. A compact white highlight marks the active player; the opponent’s rack is shown as face-down tile backs using only its count. The rack shows all of the player's own unplayed tiles, including reserve and rack. New games start at 60 per player: vowels A6/E8/I6/O5/U3, two blanks and 30 consonants. Y is a consonant. Playing decreases this count; drawing, passing and exchanging do not. Games end when one player finishes their supply, after six scoreless turns, or on resignation. Older saved games retain their shared 100-tile bag rules; their counter is explicitly labelled shared.
+
+The theme shop includes Classic (free), Sunset, Midnight, Ankara and Royal. Each paid theme
+costs ₦500 once, with a read-only board preview before purchase. Real purchases are verified
+and delivered by the server; separate product ownership is restored per account and environment.
+Local authentication uses simulated unlocks held only in memory, never a payment provider.
+
+Before an authorized release, create and approve `midnight_board`, `ankara_board`, and
+`royal_board` as ₦500 one-off cosmetic products in the LagosLife dashboard. These products
+have not been created as part of the local preview. Test each provider checkout, restore and
+native rematch in the sandbox before enabling the new catalog publicly. No new environment
+variables are required. Startup migration 2 adds a unique rematch index; it has only been
+exercised in local tests, not applied to production. Existing Sunset purchases remain valid.
+
+The personal-supply marker is stored with each game. Existing records need no conversion. Deploy client and server together for the new snapshot count. Older server code cannot safely resume personal-supply games; do not roll back to a version that strips the marker.

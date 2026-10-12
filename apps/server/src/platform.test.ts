@@ -246,3 +246,30 @@ describe('LagosLife match integration', () => {
     expect((await store.get(match.code))?.platform?.result).toBe('sent');
   });
 });
+
+it('reports the other player as winner when the higher-scoring player resigns', async () => {
+  const id = randomUUID();
+  const state = remote(id);
+  const results: unknown[] = [];
+  const provider = new Vatar('vtr_test_secret', 'test_results_secret', async (url, options) => {
+    if (String(url).endsWith('/result')) {
+      const result = JSON.parse(String(options?.body));
+      results.push(result);
+      return json({ ...state, status: 'done', winner: result.winner });
+    }
+    return json(state);
+  });
+  const service = new Matches(store, new Set(), 'test', provider);
+  let match = await service.importPlatform(id, 'RESIGN', { id: 'a', name: 'Ada' });
+  match = { ...match, game: { ...match.game, scores: [10, 200] } };
+  await store.save(match, match.revision);
+  await service.act(match.code, 'b', {
+    id: randomUUID(),
+    revision: match.revision,
+    action: { kind: 'resign' },
+  });
+  await service.retryResults();
+  expect(results).toEqual([{ winner: 'a' }]);
+  await service.retryResults();
+  expect(results).toHaveLength(1);
+});
