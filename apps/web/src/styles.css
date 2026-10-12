@@ -2038,7 +2038,11 @@
       overflow: hidden;
     }
     .app-shell {
-      height: var(--app-height, 100dvh);
+      /* Use the toolbar-open viewport: iOS Chrome can report an oversized visualViewport. */
+      position: fixed;
+      inset: 0;
+      height: auto;
+      max-height: 100svh;
       min-height: 0;
       display: flex;
       flex-direction: column;

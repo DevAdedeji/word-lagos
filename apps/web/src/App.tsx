@@ -159,25 +159,6 @@ export default function App() {
   const [blank, setBlank] = useState<{ tileId: string; row: number; col: number } | null>(null);
   const [rackOrder, setRackOrder] = useState<string[]>([]);
   const modalRef = useRef<HTMLDivElement>(null);
-  const appRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    const fitViewport = () => {
-      // Mobile browser toolbars change the visible height without changing the page layout.
-      if (viewport && viewport.scale !== 1) return;
-      appRef.current?.style.setProperty(
-        '--app-height',
-        `${viewport?.height ?? window.innerHeight}px`,
-      );
-    };
-    fitViewport();
-    viewport?.addEventListener('resize', fitViewport);
-    window.addEventListener('resize', fitViewport);
-    return () => {
-      viewport?.removeEventListener('resize', fitViewport);
-      window.removeEventListener('resize', fitViewport);
-    };
-  }, []);
   const boardScrollRef = useRef<HTMLDivElement>(null);
   const zoomFocus = useRef({ x: 0.5, y: 0.5 });
   useEffect(() => {
@@ -545,7 +526,6 @@ export default function App() {
         : `${opponentName} takes this one.`;
   return (
     <div
-      ref={appRef}
       onClickCapture={tileDrag.clickCapture}
       className={`app-shell min-h-screen bg-paper text-forest theme-${platform.previewTheme ?? platform.theme}`}
     >
