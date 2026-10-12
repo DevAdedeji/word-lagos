@@ -527,7 +527,7 @@ export default function App() {
   return (
     <div
       onClickCapture={tileDrag.clickCapture}
-      className={`app-shell min-h-screen bg-paper text-forest theme-${platform.previewTheme ?? platform.theme}`}
+      className={`app-shell min-[761px]:min-h-screen bg-paper text-forest theme-${platform.previewTheme ?? platform.theme}`}
     >
       {tileDrag.drag && draggedTile && (
         <div
