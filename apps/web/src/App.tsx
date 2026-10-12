@@ -160,17 +160,23 @@ export default function App() {
   const [rackOrder, setRackOrder] = useState<string[]>([]);
   const modalRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<HTMLDivElement>(null);
-  const rackRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!rackRef.current) return;
-    const observer = new ResizeObserver(([entry]) => {
+    const viewport = window.visualViewport;
+    const fitViewport = () => {
+      // Mobile browser toolbars change the visible height without changing the page layout.
+      if (viewport && viewport.scale !== 1) return;
       appRef.current?.style.setProperty(
-        '--rack-height',
-        `${entry.borderBoxSize[0]?.blockSize ?? rackRef.current!.getBoundingClientRect().height}px`,
+        '--app-height',
+        `${viewport?.height ?? window.innerHeight}px`,
       );
-    });
-    observer.observe(rackRef.current);
-    return () => observer.disconnect();
+    };
+    fitViewport();
+    viewport?.addEventListener('resize', fitViewport);
+    window.addEventListener('resize', fitViewport);
+    return () => {
+      viewport?.removeEventListener('resize', fitViewport);
+      window.removeEventListener('resize', fitViewport);
+    };
   }, []);
   const boardScrollRef = useRef<HTMLDivElement>(null);
   const zoomFocus = useRef({ x: 0.5, y: 0.5 });
@@ -844,7 +850,6 @@ export default function App() {
               </span>
             </div>
             <div
-              ref={rackRef}
               data-tile-rack
               className={`rack-panel ${tileDrag.drag?.target?.kind === 'rack' ? 'rack-drop-target' : ''}`}
             >
