@@ -31,6 +31,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import {
+  DICTIONARY_VERSION,
   createGame,
   availableBag,
   tilesRemaining,
@@ -298,7 +299,7 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     setLoadError(false);
-    fetch('/words.txt', { signal: controller.signal })
+    fetch(`/words.txt?v=${DICTIONARY_VERSION}`, { signal: controller.signal, cache: 'no-cache' })
       .then((r) => {
         if (!r.ok) throw new Error('Dictionary unavailable');
         return r.text();
@@ -1589,8 +1590,9 @@ export default function App() {
                   </li>
                 </ol>
                 <p className="dictionary-note">
-                  We use the English word-list dictionary, version 4.1.0. This is casual wordplay,
-                  not an official tournament word list.{' '}
+                  WordPadi English includes our original word list plus reviewed modern English
+                  additions from SCOWL. This is a casual game dictionary, not an official Scrabble
+                  tournament list.{' '}
                   <a href="/dictionary-license.txt" target="_blank" rel="noreferrer">
                     Dictionary credits <ArrowUpRight size={12} />
                   </a>

@@ -55,3 +55,11 @@ it('restores both the new personal supply and legacy shared games', () => {
     expect(loadGame()).toEqual(game);
   }
 });
+
+it('preserves an existing game when upgrading the English dictionary', () => {
+  const game = passTurn(createGame('computer', 74));
+  stored.set('word-lagos:game:v1', JSON.stringify({ ...game, dictionary: 'word-list-4.1.0' }));
+  expect(loadGame()).toEqual(game);
+  stored.set('word-lagos:game:v1', JSON.stringify({ ...game, dictionary: 'unknown-dictionary' }));
+  expect(loadGame()).toBeNull();
+});

@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { DICTIONARY_VERSION, type Game } from '@word-lagos/game-core';
+import {
+  DICTIONARY_VERSION,
+  SUPPORTED_DICTIONARY_VERSIONS,
+  type Game,
+} from '@word-lagos/game-core';
 const tile = z.object({ id: z.string().max(8), letter: z.string().regex(/^[A-Z?]$/) });
 const placement = z.object({
   tileId: z.string().max(8),
@@ -10,7 +14,9 @@ const placement = z.object({
 const schema = z
   .object({
     version: z.literal(1),
-    dictionary: z.literal(DICTIONARY_VERSION),
+    dictionary: z
+      .enum(SUPPORTED_DICTIONARY_VERSIONS)
+      .transform((): typeof DICTIONARY_VERSION => DICTIONARY_VERSION),
     mode: z.literal('computer'),
     board: z
       .array(

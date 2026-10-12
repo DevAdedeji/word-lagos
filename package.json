@@ -11,7 +11,7 @@
     "dev": "npm run dev -w @word-lagos/web",
     "build": "npm run dictionary && tsc --noEmit && npm run build -w @word-lagos/web",
     "dictionary": "node scripts/build-dictionary.mjs",
-    "test": "vitest run",
+    "test": "npm run dictionary && vitest run",
     "check": "tsc --noEmit",
     "verify": "npm run lint && npm run format:check && npm run test && npm run build",
     "lint": "oxlint --deny-warnings apps packages scripts",

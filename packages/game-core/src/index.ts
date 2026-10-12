@@ -1,6 +1,7 @@
 export const SIZE = 15;
 export const RACK_SIZE = 7;
-export const DICTIONARY_VERSION = 'word-list-4.1.0';
+export const DICTIONARY_VERSION = 'wordpadi-english-2026-10-12';
+export const SUPPORTED_DICTIONARY_VERSIONS = [DICTIONARY_VERSION, 'word-list-4.1.0'] as const;
 export type Mode = 'computer' | 'friends';
 export type Tile = { id: string; letter: string };
 export type BoardTile = Tile & { blank: boolean };

@@ -2218,7 +2218,7 @@
     .board-scroll:not(.is-zoomed) .board-frame {
       flex-shrink: 0;
       width: 100cqw;
-      height: max(100cqh, 100cqw);
+      height: 100cqh;
       min-width: 0;
       padding: 4px;
       border: 0;
@@ -4403,6 +4403,27 @@
     }
     .rack-actions .play-button > span {
       font-size: 12px;
+    }
+  }
+}
+
+@layer components {
+  @media (max-width: 760px) and (max-height: 740px) {
+    :is(.rack-panel, .opponent-rack-bar) .rack-tile {
+      height: clamp(44px, 7dvh, 52px);
+      font-size: 26px;
+    }
+    .rack-panel .rack {
+      min-height: 0;
+      margin-top: 4px;
+      margin-bottom: 6px;
+    }
+    .opponent-rack-bar {
+      padding-top: 5px;
+      padding-bottom: 7px;
+    }
+    .rack-panel .rack-actions {
+      margin-top: 8px;
     }
   }
 }

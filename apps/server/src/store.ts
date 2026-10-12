@@ -1,3 +1,4 @@
+import { DICTIONARY_VERSION, SUPPORTED_DICTIONARY_VERSIONS } from '@word-lagos/game-core';
 import { diamondStore, migrateDiamonds } from './diamonds-store';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle as liteDrizzle } from 'drizzle-orm/pglite';
@@ -27,7 +28,9 @@ export const matchSchema = z.object({
   players: z.array(playerSchema).min(1).max(2),
   game: z.object({
     version: z.literal(1),
-    dictionary: z.literal('word-list-4.1.0'),
+    dictionary: z
+      .enum(SUPPORTED_DICTIONARY_VERSIONS)
+      .transform((): typeof DICTIONARY_VERSION => DICTIONARY_VERSION),
     mode: z.literal('friends'),
     board: boardSchema,
     bag: z.array(tileSchema).max(120),

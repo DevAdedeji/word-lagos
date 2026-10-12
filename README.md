@@ -90,11 +90,13 @@ npm run verify
 
 Tests cover game rules, bot play, local saves, multiplayer membership, rack privacy, turn validation, concurrent seat reservation, optimistic writes, duplicate commands, Vatar verification failures, environment isolation and actual WebSocket clients reconnecting. Database tests use PGlite; live Neon and LagosLife sandbox validation still require configuration.
 
-Phone QA: http://127.0.0.1:43127/embed-preview.html provides a 390px iframe preview with a 56px host bar. Create/join from separate tabs, submit a word, check both scores, pass/swap on the active turn, and reload to resume. The board fills the width and scrolls in short embeds; the rack remains pinned.
+Phone QA: http://127.0.0.1:43127/embed-preview.html provides a 390px iframe preview with a 56px host bar. Create/join from separate tabs, submit a word, check both scores, pass/swap on the active turn, and reload to resume. The default mobile board fits both the available width and height, including short embeds; the rack remains pinned. Only explicit zoom enables board panning.
 
 ## Dictionary
 
-**word-list 4.1.0**, pinned in the lockfile, supplies 269,870 alphabetic entries of length 2–15. This is a casual English list, not an official tournament dictionary. Licensing ships in `apps/web/public/dictionary-license.txt`. The build regenerates the ignored `words.txt` for browser and server.
+**WordPadi English 2026-10-12** contains 270,569 words: the 269,870 entries from pinned `word-list` 4.1.0 plus 699 reviewed additions from SCOWL 2026.02.25. Examples include SELFIE, EMOJI, CODEBASE, CROWDFUND and LIVESTREAM. This is a casual English list, not the licensed Collins/NASPA dictionaries used by Scrabble GO. Source, selection and reproduction details are in `data/dictionary/README.md`; full notices ship in `apps/web/public/dictionary-license.txt`. Builds and tests regenerate the same sorted, deduplicated `words.txt` for browser, server, Ayo and diamond moves.
+
+Existing local and friend games using `word-list-4.1.0` are upgraded on read without changing tiles, scores or history; all previously accepted words remain accepted. Deploy client and server together and reload open clients after deployment. The browser requests the versioned dictionary URL with revalidation. Older servers cannot read newly saved dictionary versions, so retain this compatibility parser when rolling back. No database schema migration is needed.
 
 The active-game switcher and head-to-head records need to be deployed before using the new listing screenshots. The game has not been submitted to LagosLife. Fonts load from Google Fonts with local fallbacks.
 

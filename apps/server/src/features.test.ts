@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { winnerOf } from '@word-lagos/game-core';
-import { openStore, type Store } from './store';
+import { DICTIONARY_VERSION, winnerOf } from '@word-lagos/game-core';
+import { openStore, matchSchema, type Store } from './store';
 import { Matches, snapshot } from './matches';
 import { Purchases } from './purchases';
 import { Vatar } from './vatar';
@@ -187,4 +187,15 @@ it('reports the opponent rack count from the other seat without revealing its co
   expect(snapshot(view, a.id, new Set()).opponentRackCount).toBe(2);
   expect(snapshot(view, b.id, new Set()).opponentRackCount).toBe(7);
   expect(snapshot(await matches.create(a), a.id, new Set()).opponentRackCount).toBe(0);
+});
+
+it('upgrades legacy friend-game dictionary metadata without changing progress', async () => {
+  const match = await matches.create(person());
+  const old = { ...match, game: { ...match.game, dictionary: 'word-list-4.1.0' } };
+  const restored = matchSchema.parse(old);
+  expect(restored).toEqual(match);
+  expect(restored.game.dictionary).toBe(DICTIONARY_VERSION);
+  expect(() =>
+    matchSchema.parse({ ...old, game: { ...old.game, dictionary: 'unknown' } }),
+  ).toThrow();
 });
